@@ -1,0 +1,46 @@
+root = true
+
+[*]
+charset = utf-8
+indent_style = space
+indent_size = 4
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+[*.{json,yml,yaml,props,targets,csproj,slnx,runsettings,xml}]
+indent_size = 2
+
+[*.md]
+trim_trailing_whitespace = false
+
+[*.cs]
+csharp_style_namespace_declarations = file_scoped:warning
+csharp_using_directive_placement = outside_namespace:warning
+dotnet_sort_system_directives_first = true
+dotnet_style_qualification_for_field = true:warning
+dotnet_style_qualification_for_property = true:warning
+dotnet_style_qualification_for_method = true:warning
+dotnet_style_qualification_for_event = true:warning
+csharp_style_var_for_built_in_types = false:none
+csharp_style_var_when_type_is_apparent = true:none
+csharp_style_var_elsewhere = false:none
+
+# Documentation is enforced by StyleCop (SA1600 and related); CS1591 would duplicate it.
+dotnet_diagnostic.CS1591.severity = none
+
+# Use "this." qualification instead of an underscore prefix.
+dotnet_diagnostic.SA1309.severity = warning
+dotnet_diagnostic.SA1101.severity = warning
+
+# Calls to ConfigureAwait are unnecessary in a console host without a synchronization context.
+dotnet_diagnostic.CA2007.severity = none
+
+# Tool parameters and messages are not localized.
+dotnet_diagnostic.CA1303.severity = none
+
+[tests/**.cs]
+# MSTest test methods carry underscores by convention (Method_Scenario_Result).
+dotnet_diagnostic.CA1707.severity = none
+
+# Expected values written inline as arrays read better than static fields in assertions.
+dotnet_diagnostic.CA1861.severity = none

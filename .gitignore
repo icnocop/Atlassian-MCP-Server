@@ -1,0 +1,19 @@
+## Build output
+bin/
+obj/
+artifacts/
+TestResults/
+*.binlog
+
+## IDE and tool state
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+.claude/
+
+## Local settings that may hold credentials
+*.runsettings
+!Example.runsettings
+.env

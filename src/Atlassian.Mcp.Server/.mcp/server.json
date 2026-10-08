@@ -1,0 +1,49 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-10-17/server.schema.json",
+  "name": "io.github.icnocop/atlassian-mcp-server",
+  "title": "Atlassian MCP Server",
+  "description": "Unofficial MCP server for Jira Cloud and Confluence Cloud, with Confluence private drafts.",
+  "repository": {
+    "url": "https://github.com/icnocop/Atlassian-MCP-Server",
+    "source": "github"
+  },
+  "version": "0.1.0",
+  "packages": [
+    {
+      "registryType": "nuget",
+      "registryBaseUrl": "https://api.nuget.org",
+      "identifier": "AtlassianMcpServer",
+      "version": "0.1.0",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "ATLASSIAN_SITE_URL",
+          "description": "Your Atlassian Cloud site URL, such as https://example.atlassian.net.",
+          "isRequired": true,
+          "format": "string"
+        },
+        {
+          "name": "ATLASSIAN_EMAIL",
+          "description": "The email address of your Atlassian account.",
+          "isRequired": true,
+          "format": "string"
+        },
+        {
+          "name": "ATLASSIAN_API_TOKEN",
+          "description": "An API token for your Atlassian account.",
+          "isRequired": true,
+          "isSecret": true,
+          "format": "string"
+        },
+        {
+          "name": "ATLASSIAN_TOOLSETS",
+          "description": "Optional comma-separated toolsets to enable. Defaults to all.",
+          "isRequired": false,
+          "format": "string"
+        }
+      ]
+    }
+  ]
+}
