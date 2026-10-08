@@ -1,0 +1,99 @@
+name: Publish
+
+# Run by hand from the Actions tab. It asks whether to publish the release or the prerelease
+# package of a draft release, pushes that package to NuGet, and publishes the GitHub release.
+on:
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: Publish as a release or a prerelease
+        type: choice
+        options:
+          - prerelease
+          - release
+        default: prerelease
+      draft:
+        description: Draft release tag, such as v0.1.42 (leave empty for the newest draft)
+        type: string
+        required: false
+      push-to-nuget:
+        description: Push the package to NuGet
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Publish ${{ inputs.channel }}
+    runs-on: ubuntu-latest
+    environment: nuget
+    permissions:
+      contents: write
+      id-token: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Find the draft release and its package
+        id: draft
+        shell: bash
+        run: |
+          draft="${{ inputs.draft }}"
+          if [ -z "$draft" ]; then
+            draft=$(gh release list --limit 100 --json tagName,isDraft,createdAt \
+              --jq '[.[] | select(.isDraft)] | sort_by(.createdAt) | last | .tagName // empty')
+          fi
+          if [ -z "$draft" ]; then
+            echo "::error::There is no draft release to publish."
+            exit 1
+          fi
+
+          gh release download "$draft" --pattern "*.nupkg" --dir artifacts
+          if [ "${{ inputs.channel }}" = "release" ]; then
+            package=$(ls artifacts/*.nupkg | grep -v -- '-prerelease' | head -n 1)
+            other=$(ls artifacts/*.nupkg | grep -- '-prerelease' | head -n 1)
+          else
+            package=$(ls artifacts/*.nupkg | grep -- '-prerelease' | head -n 1)
+            other=$(ls artifacts/*.nupkg | grep -v -- '-prerelease' | head -n 1)
+          fi
+          if [ -z "$package" ]; then
+            echo "::error::The draft release $draft has no ${{ inputs.channel }} package."
+            exit 1
+          fi
+
+          version=$(basename "$package" .nupkg | sed 's/^Atlassian\.Mcp\.Server\.//')
+          echo "draft=$draft" >> "$GITHUB_OUTPUT"
+          echo "package=$package" >> "$GITHUB_OUTPUT"
+          echo "other=$(basename "$other")" >> "$GITHUB_OUTPUT"
+          echo "tag=v$version" >> "$GITHUB_OUTPUT"
+
+      # NuGet trusted publishing exchanges the workflow's identity for a short-lived API key, so no
+      # long-lived key is stored in the repository. NUGET_USER is the nuget.org account name.
+      - name: Log in to NuGet
+        id: nuget
+        if: inputs.push-to-nuget
+        uses: NuGet/login@v1
+        with:
+          user: ${{ vars.NUGET_USER }}
+
+      - name: Push to NuGet
+        if: inputs.push-to-nuget
+        run: dotnet nuget push "${{ steps.draft.outputs.package }}" --api-key "${{ steps.nuget.outputs.NUGET_API_KEY }}" --source https://api.nuget.org/v3/index.json
+
+      - name: Publish the GitHub release
+        shell: bash
+        run: |
+          draft="${{ steps.draft.outputs.draft }}"
+          tag="${{ steps.draft.outputs.tag }}"
+          other="${{ steps.draft.outputs.other }}"
+
+          # The release keeps only the package that was published.
+          if [ -n "$other" ]; then
+            gh release delete-asset "$draft" "$other" --yes
+          fi
+
+          prerelease=$([ "${{ inputs.channel }}" = "prerelease" ] && echo true || echo false)
+          gh release edit "$draft" --tag "$tag" --title "$tag" --draft=false --prerelease="$prerelease"
+          echo "Published $tag as a ${{ inputs.channel }}." >> "$GITHUB_STEP_SUMMARY"

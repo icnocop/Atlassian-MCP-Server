@@ -31,12 +31,13 @@
   </ItemGroup>
 
   <!--
-    The MCP server manifest must carry the package version. The checked-in file uses the placeholder
-    0.0.0-dev, which is replaced here, so the two can never disagree.
+    The MCP server manifest must carry the package version, so it is generated from a template:
+    every {{VERSION}} token in .mcp\server.template.json is replaced with the package version, and the
+    result is packed as .mcp\server.json.
   -->
   <Target Name="StampMcpServerManifest" BeforeTargets="_GetPackageFiles">
     <PropertyGroup>
-      <_McpServerManifest>$([System.IO.File]::ReadAllText('$(MSBuildProjectDirectory)\.mcp\server.json').Replace('0.0.0-dev', '$(PackageVersion)'))</_McpServerManifest>
+      <_McpServerManifest>$([System.IO.File]::ReadAllText('$(MSBuildProjectDirectory)\.mcp\server.template.json').Replace('{{VERSION}}', '$(PackageVersion)'))</_McpServerManifest>
     </PropertyGroup>
     <WriteLinesToFile File="$(IntermediateOutputPath)server.json" Lines="$(_McpServerManifest)" Overwrite="true" WriteOnlyWhenDifferent="true" />
     <ItemGroup>

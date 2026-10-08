@@ -45,8 +45,38 @@ builder.Services
     .WithStdioServerTransport()
     .WithAtlassianTools(options);
 
-await builder.Build().RunAsync();
-return 0;
+IHost host;
+try
+{
+    host = builder.Build();
+}
+catch (Exception exception)
+{
+    // The logger is part of the host, so a failure to build the host is written directly.
+    await Console.Error.WriteLineAsync($"The server could not start: {exception}");
+    return 1;
+}
+
+ILogger logger = host.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Atlassian.Mcp.Server");
+ServerLog.Starting(logger, ServerInfo.Name, ServerInfo.Version, options.SiteUrl);
+
+AppDomain.CurrentDomain.UnhandledException += (_, eventArgs) =>
+    ServerLog.UnhandledException(logger, eventArgs.ExceptionObject as Exception);
+
+try
+{
+    await host.RunAsync();
+    return 0;
+}
+catch (Exception exception) when (exception is not OperationCanceledException)
+{
+    ServerLog.Stopped(logger, exception);
+    return 1;
+}
+finally
+{
+    host.Dispose();
+}
 
 // The MCP transport exchanges UTF-8 JSON over standard input and output. On Windows the console
 // defaults to the OEM code page, which corrupts multi-byte characters (an em dash arrives as

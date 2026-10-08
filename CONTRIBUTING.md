@@ -48,4 +48,8 @@ Use `dotnet tool update` with the same arguments after rebuilding. The [MCP Insp
 
 ## Releases
 
-Every push to `main` builds the package and attaches it to a draft GitHub release for the version in `Directory.Build.props` (`VersionPrefix`). Publishing that draft release pushes the package to NuGet. Increase `VersionPrefix` after each release.
+Every build has a unique version, `MAJOR.MINOR.BUILD`. `MAJOR.MINOR` is `VersionMajorMinor` in `Directory.Build.props` (increase it by hand for a new feature release), and `BUILD` is the GitHub workflow run number. Local builds are `0.1.0-dev`; workflow builds are prereleases such as `0.1.42-prerelease.g1a2b3c4`, where the suffix carries the commit. The assembly, file, product, and package versions, and the versions in the generated `.mcp/server.json` (from `.mcp/server.template.json`), all follow it.
+
+Every push to `main` builds two packages from the same commit, a prerelease (`0.1.42-prerelease.g1a2b3c4`) and a release (`0.1.42`), and attaches both to a new draft GitHub release, replacing any older draft. To publish, run the **Publish** workflow from the Actions tab and choose **prerelease** or **release**. It pushes the chosen package to NuGet and publishes the GitHub release with the matching tag.
+
+Publishing to NuGet uses [trusted publishing](https://learn.microsoft.com/nuget/nuget-org/trusted-publishing): add a policy on nuget.org for this repository's `publish.yml`, set the repository variable `NUGET_USER` to the nuget.org account name, and create a `nuget` environment (optionally with required reviewers).

@@ -9,9 +9,29 @@
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <AnalysisLevel>latest-recommended</AnalysisLevel>
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
-    <VersionPrefix>0.1.0</VersionPrefix>
     <Authors>icnocop</Authors>
     <Copyright>Copyright (c) icnocop</Copyright>
+  </PropertyGroup>
+
+  <!--
+    Versioning. Every build gets a unique version: MAJOR.MINOR comes from VersionMajorMinor (increase it
+    by hand for a new feature release), and PATCH is the build number, which the GitHub workflow passes
+    as the run number. Builds are prereleases unless Prerelease is false:
+      CI prerelease:  0.1.42-prerelease.g1a2b3c4   (/p:BuildNumber=42 /p:CommitId=g1a2b3c4)
+      CI release:     0.1.42                       (/p:BuildNumber=42 /p:Prerelease=false)
+      Local build:    0.1.0-dev
+    The commit ID starts with "g" because a SemVer identifier made only of digits may not start with 0.
+  -->
+  <PropertyGroup>
+    <VersionMajorMinor>0.1</VersionMajorMinor>
+    <BuildNumber Condition="'$(BuildNumber)' == ''">0</BuildNumber>
+    <Prerelease Condition="'$(Prerelease)' == ''">true</Prerelease>
+    <VersionPrefix>$(VersionMajorMinor).$(BuildNumber)</VersionPrefix>
+    <VersionSuffix Condition="'$(Prerelease)' != 'true'"></VersionSuffix>
+    <VersionSuffix Condition="'$(Prerelease)' == 'true' and '$(CommitId)' != ''">prerelease.$(CommitId)</VersionSuffix>
+    <VersionSuffix Condition="'$(Prerelease)' == 'true' and '$(CommitId)' == ''">dev</VersionSuffix>
+    <AssemblyVersion>$(VersionPrefix).0</AssemblyVersion>
+    <FileVersion>$(VersionPrefix).0</FileVersion>
   </PropertyGroup>
 
   <ItemGroup>
