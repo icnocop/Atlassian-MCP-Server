@@ -82,18 +82,3 @@ jobs:
 
           gh release create "$tag" "$package" --prerelease --latest=false --title "$tag" --generate-notes --target "$GITHUB_SHA"
           echo "Published the GitHub pre-release $tag. Run the Publish workflow to push it to NuGet or to release it." >> "$GITHUB_STEP_SUMMARY"
-
-      # Keep the list of releases short: older pre-releases are deleted with their tags, except
-      # those whose package was pushed to NuGet.
-      - name: Remove older pre-releases
-        shell: bash
-        run: |
-          current="v$(basename "$(ls artifacts/*.nupkg | head -n 1)" .nupkg | sed 's/^Atlassian\.Mcp\.Server\.//')"
-          published=$(curl -sf https://api.nuget.org/v3-flatcontainer/atlassian.mcp.server/index.json | jq -r '.versions[]' || true)
-
-          for tag in $(gh release list --limit 100 --json tagName,isPrerelease --jq '.[] | select(.isPrerelease) | .tagName'); do
-            version="${tag#v}"
-            if [ "$tag" != "$current" ] && ! grep -qix -- "$version" <<< "$published"; then
-              gh release delete "$tag" --yes --cleanup-tag
-            fi
-          done
