@@ -7,7 +7,7 @@
 
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>atlassian-mcp-server</ToolCommandName>
-    <PackageId>AtlassianMcpServer</PackageId>
+    <PackageId>Atlassian.Mcp.Server</PackageId>
     <PackageType>McpServer;DotnetTool</PackageType>
     <Title>Atlassian MCP Server</Title>
     <Description>An unofficial Model Context Protocol (MCP) server for Jira Cloud and Confluence Cloud: issues, search, comments, links, attachments, agile boards, and Confluence pages with private drafts.</Description>

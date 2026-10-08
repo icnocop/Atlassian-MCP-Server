@@ -25,7 +25,7 @@ The server speaks MCP over standard input and output, so it waits silently for a
 
 ```shell
 dotnet pack src/Atlassian.Mcp.Server -c Release
-dotnet tool install --global AtlassianMcpServer --add-source ./artifacts --prerelease
+dotnet tool install --global Atlassian.Mcp.Server --add-source ./artifacts --prerelease
 ```
 
 Use `dotnet tool update` with the same arguments after rebuilding. The [MCP Inspector](https://github.com/modelcontextprotocol/inspector) (`npx @modelcontextprotocol/inspector atlassian-mcp-server`) is useful for calling tools by hand.

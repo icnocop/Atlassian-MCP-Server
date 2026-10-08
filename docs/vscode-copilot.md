@@ -18,7 +18,7 @@ Open the Command Palette, run **MCP: Open User Configuration**, and add the serv
     "atlassian": {
       "type": "stdio",
       "command": "dnx",
-      "args": ["AtlassianMcpServer", "--yes"],
+      "args": ["Atlassian.Mcp.Server", "--yes"],
       "env": {
         "ATLASSIAN_SITE_URL": "https://example.atlassian.net",
         "ATLASSIAN_EMAIL": "you@example.com",
@@ -42,4 +42,4 @@ Open the Chat view in Agent mode, select **Configure Tools**, and confirm that t
 
 ## Updates
 
-`dnx` runs the latest version from NuGet each time VS Code starts the server. To stay on one version, use `AtlassianMcpServer@<version>`.
+`dnx` runs the latest version from NuGet each time VS Code starts the server. To stay on one version, use `Atlassian.Mcp.Server@<version>`.

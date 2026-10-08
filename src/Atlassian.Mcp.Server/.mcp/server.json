@@ -12,7 +12,7 @@
     {
       "registryType": "nuget",
       "registryBaseUrl": "https://api.nuget.org",
-      "identifier": "AtlassianMcpServer",
+      "identifier": "Atlassian.Mcp.Server",
       "version": "0.0.0-dev",
       "transport": {
         "type": "stdio"

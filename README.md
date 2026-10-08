@@ -1,7 +1,7 @@
 # Atlassian MCP Server
 
 [![Build](https://github.com/icnocop/Atlassian-MCP-Server/actions/workflows/build.yml/badge.svg)](https://github.com/icnocop/Atlassian-MCP-Server/actions/workflows/build.yml)
-[![NuGet](https://img.shields.io/nuget/v/AtlassianMcpServer.svg)](https://www.nuget.org/packages/AtlassianMcpServer)
+[![NuGet](https://img.shields.io/nuget/v/Atlassian.Mcp.Server.svg)](https://www.nuget.org/packages/Atlassian.Mcp.Server)
 
 A [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that lets AI assistants such as Claude Code and GitHub Copilot work with **Jira Cloud** and **Confluence Cloud**. It runs on your machine, talks to your site with your own API token, and needs no Rovo credits.
 
@@ -48,7 +48,7 @@ The server acts as you: it can see and change only what your account can, and ev
 ## Getting started
 
 1. **Create an API token** at https://id.atlassian.com/manage-profile/security/api-tokens.
-2. **Add the server to your AI assistant.** Every client runs the same command, `dnx AtlassianMcpServer --yes`, which downloads the server from NuGet and runs the latest version each time it starts. Follow the guide for your assistant:
+2. **Add the server to your AI assistant.** Every client runs the same command, `dnx Atlassian.Mcp.Server --yes`, which downloads the server from NuGet and runs the latest version each time it starts. Follow the guide for your assistant:
    - [Claude Code](docs/claude-code.md)
    - [GitHub Copilot in Visual Studio Code](docs/vscode-copilot.md)
    - [GitHub Copilot in Visual Studio](docs/visual-studio-copilot.md)

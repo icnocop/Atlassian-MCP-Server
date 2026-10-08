@@ -10,7 +10,7 @@ Add the server to `~/.copilot/mcp-config.json` (on Windows, `%USERPROFILE%\.copi
     "atlassian": {
       "type": "local",
       "command": "dnx",
-      "args": ["AtlassianMcpServer", "--yes"],
+      "args": ["Atlassian.Mcp.Server", "--yes"],
       "env": {
         "ATLASSIAN_SITE_URL": "https://example.atlassian.net",
         "ATLASSIAN_EMAIL": "you@example.com",
@@ -31,4 +31,4 @@ Run `/mcp` in the Copilot CLI and confirm that `atlassian` is connected. Then as
 
 ## Updates
 
-`dnx` runs the latest version from NuGet each time the Copilot CLI starts the server. To stay on one version, use `AtlassianMcpServer@<version>`.
+`dnx` runs the latest version from NuGet each time the Copilot CLI starts the server. To stay on one version, use `Atlassian.Mcp.Server@<version>`.

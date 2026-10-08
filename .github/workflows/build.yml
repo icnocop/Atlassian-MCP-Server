@@ -78,7 +78,7 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           package=$(ls artifacts/*.nupkg | head -n 1)
-          version=$(basename "$package" .nupkg | sed 's/^AtlassianMcpServer\.//')
+          version=$(basename "$package" .nupkg | sed 's/^Atlassian\.Mcp\.Server\.//')
           tag="v$version"
 
           if gh release view "$tag" --json isDraft --jq .isDraft > is_draft 2>/dev/null; then

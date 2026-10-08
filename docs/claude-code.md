@@ -9,7 +9,7 @@ claude mcp add atlassian --scope user \
   -e ATLASSIAN_SITE_URL=https://example.atlassian.net \
   -e ATLASSIAN_EMAIL=you@example.com \
   -e ATLASSIAN_API_TOKEN=your-api-token \
-  -- dnx AtlassianMcpServer --yes
+  -- dnx Atlassian.Mcp.Server --yes
 ```
 
 On Windows PowerShell, put the command on one line or end each line with a backtick (`` ` ``) instead of a backslash.
@@ -21,7 +21,7 @@ To share the server with a team through a project's `.mcp.json` file instead, us
   "mcpServers": {
     "atlassian": {
       "command": "dnx",
-      "args": ["AtlassianMcpServer", "--yes"],
+      "args": ["Atlassian.Mcp.Server", "--yes"],
       "env": {
         "ATLASSIAN_SITE_URL": "https://example.atlassian.net",
         "ATLASSIAN_EMAIL": "${ATLASSIAN_EMAIL}",
@@ -56,4 +56,4 @@ Claude Code shows the tools as `mcp__atlassian__<tool>`, such as `mcp__atlassian
 
 ## Updates
 
-`dnx` runs the latest version from NuGet each time Claude Code starts the server. To stay on one version, use `AtlassianMcpServer@<version>` in place of `AtlassianMcpServer`.
+`dnx` runs the latest version from NuGet each time Claude Code starts the server. To stay on one version, use `Atlassian.Mcp.Server@<version>` in place of `Atlassian.Mcp.Server`.
