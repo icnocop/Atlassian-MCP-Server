@@ -13,14 +13,20 @@ namespace Atlassian.Mcp.Server.Common.Json;
 public static class JsonPruner
 {
     /// <summary>
-    /// The property names removed at every level. They hold API navigation links, avatar image
-    /// URLs, and expansion hints, none of which help a model act on the data.
+    /// The property names removed at every level. They hold API navigation links, avatar and icon
+    /// details, internal entity IDs, display colors, user time zones, and expansion hints, none of
+    /// which help a model act on the data.
     /// </summary>
     private static readonly HashSet<string> NoiseProperties = new(StringComparer.Ordinal)
     {
         "self",
         "avatarUrls",
+        "avatarId",
         "iconUrl",
+        "entityId",
+        "colorName",
+        "timeZone",
+        "accountType",
         "expand",
         "_expandable",
         "_links",

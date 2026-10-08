@@ -28,8 +28,21 @@
 
   <ItemGroup>
     <None Include="..\..\README.md" Pack="true" PackagePath="\" />
-    <None Include=".mcp\server.json" Pack="true" PackagePath="\.mcp\" />
   </ItemGroup>
+
+  <!--
+    The MCP server manifest must carry the package version. The checked-in file uses the placeholder
+    0.0.0-dev, which is replaced here, so the two can never disagree.
+  -->
+  <Target Name="StampMcpServerManifest" BeforeTargets="_GetPackageFiles">
+    <PropertyGroup>
+      <_McpServerManifest>$([System.IO.File]::ReadAllText('$(MSBuildProjectDirectory)\.mcp\server.json').Replace('0.0.0-dev', '$(PackageVersion)'))</_McpServerManifest>
+    </PropertyGroup>
+    <WriteLinesToFile File="$(IntermediateOutputPath)server.json" Lines="$(_McpServerManifest)" Overwrite="true" WriteOnlyWhenDifferent="true" />
+    <ItemGroup>
+      <None Include="$(IntermediateOutputPath)server.json" Pack="true" PackagePath=".mcp\server.json" />
+    </ItemGroup>
+  </Target>
 
   <ItemGroup>
     <InternalsVisibleTo Include="Atlassian.Mcp.Server.Tests" />

@@ -7,13 +7,13 @@
     "url": "https://github.com/icnocop/Atlassian-MCP-Server",
     "source": "github"
   },
-  "version": "0.1.0",
+  "version": "0.0.0-dev",
   "packages": [
     {
       "registryType": "nuget",
       "registryBaseUrl": "https://api.nuget.org",
       "identifier": "AtlassianMcpServer",
-      "version": "0.1.0",
+      "version": "0.0.0-dev",
       "transport": {
         "type": "stdio"
       },

@@ -1,0 +1,119 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  build:
+    name: Build and test (${{ matrix.os }})
+    if: github.event_name != 'release'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+
+      - name: Restore
+        run: dotnet restore Atlassian.Mcp.Server.sln
+
+      - name: Build
+        run: dotnet build Atlassian.Mcp.Server.sln --configuration Release --no-restore
+
+      - name: Test
+        run: dotnet test Atlassian.Mcp.Server.sln --configuration Release --no-build --filter "TestCategory!=Integration"
+
+      # Pull request builds get a prerelease version, so they can never be mistaken for a release.
+      - name: Pack
+        if: matrix.os == 'ubuntu-latest'
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            suffix="--version-suffix pr.${{ github.event.number }}.${{ github.run_number }}"
+          fi
+          dotnet pack src/Atlassian.Mcp.Server --configuration Release --no-build $suffix
+
+      - name: Upload package
+        if: matrix.os == 'ubuntu-latest'
+        uses: actions/upload-artifact@v5
+        with:
+          name: package
+          path: artifacts/*.nupkg
+          if-no-files-found: error
+
+  draft-release:
+    name: Update the draft release
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          name: package
+          path: artifacts
+
+      - name: Create or update the draft release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          package=$(ls artifacts/*.nupkg | head -n 1)
+          version=$(basename "$package" .nupkg | sed 's/^AtlassianMcpServer\.//')
+          tag="v$version"
+
+          if gh release view "$tag" --json isDraft --jq .isDraft > is_draft 2>/dev/null; then
+            if [ "$(cat is_draft)" != "true" ]; then
+              echo "::error::Release $tag is already published. Increase VersionPrefix in Directory.Build.props."
+              exit 1
+            fi
+            gh release upload "$tag" "$package" --clobber
+            gh release edit "$tag" --target "$GITHUB_SHA"
+          else
+            gh release create "$tag" "$package" --draft --title "$tag" --generate-notes --target "$GITHUB_SHA"
+          fi
+
+  publish:
+    name: Publish to NuGet
+    if: github.event_name == 'release' && vars.NUGET_USER != ''
+    runs-on: ubuntu-latest
+    environment: nuget
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Download the release package
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: gh release download "${{ github.event.release.tag_name }}" --pattern "*.nupkg" --dir artifacts
+
+      # NuGet trusted publishing exchanges the workflow's identity for a short-lived API key, so
+      # no long-lived key is stored in the repository.
+      - name: Log in to NuGet
+        id: nuget
+        uses: NuGet/login@v1
+        with:
+          user: ${{ vars.NUGET_USER }}
+
+      - name: Push
+        run: dotnet nuget push "artifacts/*.nupkg" --api-key "${{ steps.nuget.outputs.NUGET_API_KEY }}" --source https://api.nuget.org/v3/index.json --skip-duplicate

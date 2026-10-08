@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Settings for the integration tests, which call a real Atlassian site.
+  Copy this file to Local.runsettings (ignored by Git), fill in the values, and run:
+    dotnet test Atlassian.Mcp.Server.sln -s Local.runsettings --filter TestCategory=Integration
+-->
+<RunSettings>
+  <RunConfiguration>
+    <EnvironmentVariables>
+      <ATLASSIAN_SITE_URL>https://example.atlassian.net</ATLASSIAN_SITE_URL>
+      <ATLASSIAN_EMAIL>you@example.com</ATLASSIAN_EMAIL>
+      <ATLASSIAN_API_TOKEN>your-api-token</ATLASSIAN_API_TOKEN>
+      <ATLASSIAN_TEST_JIRA_PROJECT_KEY>PROJ</ATLASSIAN_TEST_JIRA_PROJECT_KEY>
+      <ATLASSIAN_TEST_JIRA_ISSUE_KEY>PROJ-1</ATLASSIAN_TEST_JIRA_ISSUE_KEY>
+      <ATLASSIAN_TEST_CONFLUENCE_SPACE_KEY>~you</ATLASSIAN_TEST_CONFLUENCE_SPACE_KEY>
+    </EnvironmentVariables>
+  </RunConfiguration>
+</RunSettings>

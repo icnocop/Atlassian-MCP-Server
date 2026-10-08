@@ -2,6 +2,7 @@
 // Copyright (c) icnocop. Licensed under the MIT License.
 // </copyright>
 
+using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -22,11 +23,13 @@ public static class JsonDefaults
     };
 
     /// <summary>
-    /// Gets the options for tool results: the same as <see cref="Options"/>, without indentation
-    /// to keep results small.
+    /// Gets the options for tool results: the same as <see cref="Options"/>, without indentation,
+    /// and without escaping characters such as quotes, ampersands, and non-ASCII letters, which
+    /// only matter when JSON is embedded in HTML. Both keep results small and readable.
     /// </summary>
     public static JsonSerializerOptions Results { get; } = new(Options)
     {
         WriteIndented = false,
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
     };
 }
