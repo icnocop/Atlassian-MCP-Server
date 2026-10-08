@@ -28,8 +28,8 @@ jobs:
         with:
           global-json-file: global.json
 
-      # Every build has a unique version: the run number is the patch number, and prerelease
-      # versions also carry the commit. See the versioning notes in Directory.Build.props.
+      # Every build has a unique version: the run number is the patch number, and the prerelease
+      # suffix carries the commit. See the versioning notes in Directory.Build.props.
       - name: Set version properties
         shell: bash
         run: |
@@ -45,49 +45,55 @@ jobs:
       - name: Test
         run: dotnet test Atlassian.Mcp.Server.sln --configuration Release --no-build --filter "TestCategory!=Integration"
 
-      # Both packages are built from the same commit, so that the Publish workflow can release
-      # either one. The release package is rebuilt so its assemblies carry the release version.
       - name: Pack
         if: matrix.os == 'ubuntu-latest'
-        run: |
-          dotnet pack src/Atlassian.Mcp.Server --configuration Release --no-build ${{ env.VERSION_PROPERTIES }}
-          dotnet pack src/Atlassian.Mcp.Server --configuration Release ${{ env.VERSION_PROPERTIES }} -p:Prerelease=false
+        run: dotnet pack src/Atlassian.Mcp.Server --configuration Release --no-build ${{ env.VERSION_PROPERTIES }}
 
-      - name: Upload packages
+      - name: Upload package
         if: matrix.os == 'ubuntu-latest'
         uses: actions/upload-artifact@v5
         with:
-          name: packages
+          name: package
           path: artifacts/*.nupkg
           if-no-files-found: error
 
-  draft-release:
-    name: Create the draft release
+  prerelease:
+    name: Publish the GitHub pre-release
     needs: build
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
     steps:
       - uses: actions/download-artifact@v5
         with:
-          name: packages
+          name: package
           path: artifacts
 
-      - name: Create the draft release and remove older drafts
+      - name: Publish the pre-release
         shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
         run: |
-          release_package=$(ls artifacts/*.nupkg | grep -v -- '-prerelease' | head -n 1)
-          version=$(basename "$release_package" .nupkg | sed 's/^Atlassian\.Mcp\.Server\.//')
+          package=$(ls artifacts/*.nupkg | head -n 1)
+          version=$(basename "$package" .nupkg | sed 's/^Atlassian\.Mcp\.Server\.//')
           tag="v$version"
 
-          # Only the newest build is offered for publishing; older unpublished drafts are removed.
-          for old in $(gh release list --limit 100 --json tagName,isDraft --jq '.[] | select(.isDraft) | .tagName'); do
-            gh release delete "$old" --yes
-          done
+          gh release create "$tag" "$package" --prerelease --latest=false --title "$tag" --generate-notes --target "$GITHUB_SHA"
+          echo "Published the GitHub pre-release $tag. Run the Publish workflow to push it to NuGet or to release it." >> "$GITHUB_STEP_SUMMARY"
 
-          gh release create "$tag" artifacts/*.nupkg --draft --title "$tag" --generate-notes --target "$GITHUB_SHA"
-          echo "Created draft release $tag. Run the Publish workflow to release it." >> "$GITHUB_STEP_SUMMARY"
+      # Keep the list of releases short: older pre-releases are deleted with their tags, except
+      # those whose package was pushed to NuGet.
+      - name: Remove older pre-releases
+        shell: bash
+        run: |
+          current="v$(basename "$(ls artifacts/*.nupkg | head -n 1)" .nupkg | sed 's/^Atlassian\.Mcp\.Server\.//')"
+          published=$(curl -sf https://api.nuget.org/v3-flatcontainer/atlassian.mcp.server/index.json | jq -r '.versions[]' || true)
+
+          for tag in $(gh release list --limit 100 --json tagName,isPrerelease --jq '.[] | select(.isPrerelease) | .tagName'); do
+            version="${tag#v}"
+            if [ "$tag" != "$current" ] && ! grep -qix -- "$version" <<< "$published"; then
+              gh release delete "$tag" --yes --cleanup-tag
+            fi
+          done

@@ -1,19 +1,19 @@
 name: Publish
 
-# Run by hand from the Actions tab. It asks whether to publish the release or the prerelease
-# package of a draft release, pushes that package to NuGet, and publishes the GitHub release.
+# Run by hand from the Actions tab. It asks whether to publish a GitHub pre-release as a NuGet
+# prerelease, or to build a release from the same commit and publish it to NuGet and GitHub.
 on:
   workflow_dispatch:
     inputs:
       channel:
-        description: Publish as a release or a prerelease
+        description: Publish as a prerelease or a release
         type: choice
         options:
           - prerelease
           - release
         default: prerelease
-      draft:
-        description: Draft release tag, such as v0.1.42 (leave empty for the newest draft)
+      pre-release:
+        description: GitHub pre-release tag, such as v0.1.42-prerelease.g1a2b3c4 (leave empty for the newest)
         type: string
         required: false
       push-to-nuget:
@@ -23,6 +23,10 @@ on:
 
 permissions:
   contents: read
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
 
 jobs:
   publish:
@@ -36,38 +40,60 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
     steps:
-      - name: Find the draft release and its package
-        id: draft
+      - name: Find the pre-release
+        id: source
         shell: bash
         run: |
-          draft="${{ inputs.draft }}"
-          if [ -z "$draft" ]; then
-            draft=$(gh release list --limit 100 --json tagName,isDraft,createdAt \
-              --jq '[.[] | select(.isDraft)] | sort_by(.createdAt) | last | .tagName // empty')
+          tag="${{ inputs.pre-release }}"
+          if [ -z "$tag" ]; then
+            tag=$(gh release list --limit 100 --json tagName,isPrerelease,createdAt \
+              --jq '[.[] | select(.isPrerelease)] | sort_by(.createdAt) | last | .tagName // empty')
           fi
-          if [ -z "$draft" ]; then
-            echo "::error::There is no draft release to publish."
+          if [ -z "$tag" ]; then
+            echo "::error::There is no GitHub pre-release to publish."
             exit 1
           fi
 
-          gh release download "$draft" --pattern "*.nupkg" --dir artifacts
-          if [ "${{ inputs.channel }}" = "release" ]; then
-            package=$(ls artifacts/*.nupkg | grep -v -- '-prerelease' | head -n 1)
-            other=$(ls artifacts/*.nupkg | grep -- '-prerelease' | head -n 1)
-          else
-            package=$(ls artifacts/*.nupkg | grep -- '-prerelease' | head -n 1)
-            other=$(ls artifacts/*.nupkg | grep -v -- '-prerelease' | head -n 1)
-          fi
-          if [ -z "$package" ]; then
-            echo "::error::The draft release $draft has no ${{ inputs.channel }} package."
-            exit 1
-          fi
+          version="${tag#v}"
+          commit=$(gh release view "$tag" --json targetCommitish --jq .targetCommitish)
+          build_number=$(echo "$version" | sed -E 's/^[0-9]+\.[0-9]+\.([0-9]+).*/\1/')
 
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+          echo "build-number=$build_number" >> "$GITHUB_OUTPUT"
+
+      - name: Download the prerelease package
+        if: inputs.channel == 'prerelease'
+        run: gh release download "${{ steps.source.outputs.tag }}" --pattern "*.nupkg" --dir artifacts
+
+      # The release is built from the pre-release's commit with the same build number and no suffix,
+      # so that 0.1.42 and 0.1.42-prerelease.g1a2b3c4 hold the same code.
+      - uses: actions/checkout@v5
+        if: inputs.channel == 'release'
+        with:
+          ref: ${{ steps.source.outputs.commit }}
+
+      - uses: actions/setup-dotnet@v5
+        if: inputs.channel == 'release'
+        with:
+          global-json-file: global.json
+
+      - name: Build, test, and pack the release
+        if: inputs.channel == 'release'
+        run: |
+          properties="-p:BuildNumber=${{ steps.source.outputs.build-number }} -p:Prerelease=false"
+          dotnet build Atlassian.Mcp.Server.sln --configuration Release $properties
+          dotnet test Atlassian.Mcp.Server.sln --configuration Release --no-build --filter "TestCategory!=Integration"
+          dotnet pack src/Atlassian.Mcp.Server --configuration Release --no-build $properties
+
+      - name: Find the package
+        id: package
+        shell: bash
+        run: |
+          package=$(ls artifacts/*.nupkg | head -n 1)
           version=$(basename "$package" .nupkg | sed 's/^Atlassian\.Mcp\.Server\.//')
-          echo "draft=$draft" >> "$GITHUB_OUTPUT"
-          echo "package=$package" >> "$GITHUB_OUTPUT"
-          echo "other=$(basename "$other")" >> "$GITHUB_OUTPUT"
-          echo "tag=v$version" >> "$GITHUB_OUTPUT"
+          echo "path=$package" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
 
       # NuGet trusted publishing exchanges the workflow's identity for a short-lived API key, so no
       # long-lived key is stored in the repository. NUGET_USER is the nuget.org account name.
@@ -80,20 +106,15 @@ jobs:
 
       - name: Push to NuGet
         if: inputs.push-to-nuget
-        run: dotnet nuget push "${{ steps.draft.outputs.package }}" --api-key "${{ steps.nuget.outputs.NUGET_API_KEY }}" --source https://api.nuget.org/v3/index.json
+        run: dotnet nuget push "${{ steps.package.outputs.path }}" --api-key "${{ steps.nuget.outputs.NUGET_API_KEY }}" --source https://api.nuget.org/v3/index.json
 
       - name: Publish the GitHub release
-        shell: bash
+        if: inputs.channel == 'release'
         run: |
-          draft="${{ steps.draft.outputs.draft }}"
-          tag="${{ steps.draft.outputs.tag }}"
-          other="${{ steps.draft.outputs.other }}"
+          tag="v${{ steps.package.outputs.version }}"
+          gh release create "$tag" "${{ steps.package.outputs.path }}" --latest --title "$tag" --generate-notes --target "${{ steps.source.outputs.commit }}"
+          echo "Published the release $tag." >> "$GITHUB_STEP_SUMMARY"
 
-          # The release keeps only the package that was published.
-          if [ -n "$other" ]; then
-            gh release delete-asset "$draft" "$other" --yes
-          fi
-
-          prerelease=$([ "${{ inputs.channel }}" = "prerelease" ] && echo true || echo false)
-          gh release edit "$draft" --tag "$tag" --title "$tag" --draft=false --prerelease="$prerelease"
-          echo "Published $tag as a ${{ inputs.channel }}." >> "$GITHUB_STEP_SUMMARY"
+      - name: Summary
+        if: inputs.channel == 'prerelease'
+        run: echo "Pushed ${{ steps.package.outputs.version }} to NuGet." >> "$GITHUB_STEP_SUMMARY"
