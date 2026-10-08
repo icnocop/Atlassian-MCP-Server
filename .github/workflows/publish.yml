@@ -36,6 +36,7 @@ jobs:
     permissions:
       contents: write
       id-token: write
+      packages: write
     env:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
@@ -78,13 +79,16 @@ jobs:
         with:
           global-json-file: global.json
 
-      - name: Build, test, and pack the release
+      - name: Build, test, pack, and zip the release
         if: inputs.channel == 'release'
         run: |
           properties="-p:BuildNumber=${{ steps.source.outputs.build-number }} -p:Prerelease=false"
           dotnet build Atlassian.Mcp.Server.sln --configuration Release $properties
           dotnet test Atlassian.Mcp.Server.sln --configuration Release --no-build --filter "TestCategory!=Integration"
           dotnet pack src/Atlassian.Mcp.Server --configuration Release --no-build $properties
+          version=$(basename "$(ls artifacts/*.nupkg | head -n 1)" .nupkg | sed 's/^Atlassian\.Mcp\.Server\.//')
+          dotnet publish src/Atlassian.Mcp.Server --configuration Release --no-build $properties -p:UseAppHost=false --output publish
+          (cd publish && zip -r -q "../artifacts/Atlassian.Mcp.Server.$version.zip" .)
 
       - name: Find the package
         id: package
@@ -94,6 +98,11 @@ jobs:
           version=$(basename "$package" .nupkg | sed 's/^Atlassian\.Mcp\.Server\.//')
           echo "path=$package" >> "$GITHUB_OUTPUT"
           echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      # The prerelease package is already on GitHub Packages; the Build workflow pushed it.
+      - name: Push to GitHub Packages
+        if: inputs.channel == 'release'
+        run: dotnet nuget push "${{ steps.package.outputs.path }}" --api-key "${{ github.token }}" --source "https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json"
 
       # NuGet trusted publishing exchanges the workflow's identity for a short-lived API key, so no
       # long-lived key is stored in the repository. NUGET_USER is the nuget.org account name.
@@ -112,7 +121,7 @@ jobs:
         if: inputs.channel == 'release'
         run: |
           tag="v${{ steps.package.outputs.version }}"
-          gh release create "$tag" "${{ steps.package.outputs.path }}" --latest --title "$tag" --generate-notes --target "${{ steps.source.outputs.commit }}"
+          gh release create "$tag" "${{ steps.package.outputs.path }}" artifacts/*.zip --latest --title "$tag" --generate-notes --target "${{ steps.source.outputs.commit }}"
           echo "Published the release $tag." >> "$GITHUB_STEP_SUMMARY"
 
       - name: Summary

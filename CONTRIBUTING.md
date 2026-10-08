@@ -50,7 +50,7 @@ Use `dotnet tool update` with the same arguments after rebuilding. The [MCP Insp
 
 Every build has a unique version, `MAJOR.MINOR.BUILD`. `MAJOR.MINOR` is `VersionMajorMinor` in `Directory.Build.props` (increase it by hand for a new feature release), and `BUILD` is the GitHub workflow run number. Local builds are `0.1.0-dev`; workflow builds are prereleases such as `0.1.42-prerelease.g1a2b3c4`, where the suffix carries the commit. The assembly, file, product, and package versions, and the versions in the generated `.mcp/server.json` (from `.mcp/server.template.json`), all follow it.
 
-Every push to `main` publishes a GitHub pre-release, such as `v0.1.42-prerelease.g1a2b3c4`, with its package attached. Nothing goes to NuGet until you run the **Publish** workflow from the Actions tab and choose:
+Every push to `main` publishes a GitHub pre-release, such as `v0.1.42-prerelease.g1a2b3c4`, with the NuGet package and a zip of the published server attached (run it with `dotnet Atlassian.Mcp.Server.dll`), and pushes the package to this repository's [GitHub Packages](https://github.com/icnocop/Atlassian-MCP-Server/pkgs/nuget/Atlassian.Mcp.Server) NuGet feed. A release is pushed there too. Nothing goes to nuget.org until you run the **Publish** workflow from the Actions tab and choose:
 
 - **prerelease**, to push a pre-release's package to NuGet as it is (the newest pre-release by default), or
 - **release**, to build that pre-release's commit with the same build number and no suffix (such as `0.1.42`), test it, push it to NuGet, and publish it as the latest GitHub release.

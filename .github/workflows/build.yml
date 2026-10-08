@@ -45,16 +45,25 @@ jobs:
       - name: Test
         run: dotnet test Atlassian.Mcp.Server.sln --configuration Release --no-build --filter "TestCategory!=Integration"
 
-      - name: Pack
+      # The NuGet package, and a zip of the published server for running it without NuGet. The zip
+      # has no native launcher, so the same file runs on every OS: dotnet Atlassian.Mcp.Server.dll.
+      - name: Pack and zip
         if: matrix.os == 'ubuntu-latest'
-        run: dotnet pack src/Atlassian.Mcp.Server --configuration Release --no-build ${{ env.VERSION_PROPERTIES }}
+        shell: bash
+        run: |
+          dotnet pack src/Atlassian.Mcp.Server --configuration Release --no-build ${{ env.VERSION_PROPERTIES }}
+          version=$(basename "$(ls artifacts/*.nupkg | head -n 1)" .nupkg | sed 's/^Atlassian\.Mcp\.Server\.//')
+          dotnet publish src/Atlassian.Mcp.Server --configuration Release --no-build ${{ env.VERSION_PROPERTIES }} -p:UseAppHost=false --output publish
+          (cd publish && zip -r -q "../artifacts/Atlassian.Mcp.Server.$version.zip" .)
 
       - name: Upload package
         if: matrix.os == 'ubuntu-latest'
         uses: actions/upload-artifact@v5
         with:
           name: package
-          path: artifacts/*.nupkg
+          path: |
+            artifacts/*.nupkg
+            artifacts/*.zip
           if-no-files-found: error
 
   prerelease:
@@ -64,6 +73,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      packages: write
     env:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
@@ -73,6 +83,9 @@ jobs:
           name: package
           path: artifacts
 
+      - name: Push to GitHub Packages
+        run: dotnet nuget push "artifacts/*.nupkg" --api-key "${{ github.token }}" --source "https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json"
+
       - name: Publish the pre-release
         shell: bash
         run: |
@@ -80,5 +93,5 @@ jobs:
           version=$(basename "$package" .nupkg | sed 's/^Atlassian\.Mcp\.Server\.//')
           tag="v$version"
 
-          gh release create "$tag" "$package" --prerelease --latest=false --title "$tag" --generate-notes --target "$GITHUB_SHA"
+          gh release create "$tag" "$package" artifacts/*.zip --prerelease --latest=false --title "$tag" --generate-notes --target "$GITHUB_SHA"
           echo "Published the GitHub pre-release $tag. Run the Publish workflow to push it to NuGet or to release it." >> "$GITHUB_STEP_SUMMARY"
