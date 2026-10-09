@@ -5,9 +5,9 @@
 using System.ComponentModel;
 using System.Text.Json.Nodes;
 using Atlassian.Mcp.Server.Common;
+using Atlassian.Mcp.Server.Common.Attachments;
 using Atlassian.Mcp.Server.Common.Http;
 using Atlassian.Mcp.Server.Configuration;
-using ModelContextProtocol;
 using ModelContextProtocol.Server;
 
 namespace Atlassian.Mcp.Server.Jira.Attachments;
@@ -22,15 +22,33 @@ public sealed class AttachmentTools
     /// <summary>The largest attachment returned by <see cref="GetContent"/>, to protect the model's context.</summary>
     internal const long MaxContentBytes = 10 * 1024 * 1024;
 
+    /// <summary>The description of the file name parameter of the tools that add an attachment.</summary>
+    internal const string FileNameDescription =
+        "The file name, with its extension, such as screenshot.png. Required with base64Content. Optional with filePath, where it defaults to the file's own name.";
+
+    /// <summary>The description of the base64 content parameter of the tools that add an attachment.</summary>
+    internal const string Base64ContentDescription =
+        "The file content, encoded as base64. Use it only for content you generate; pass filePath for a file that already exists. Pass base64Content or filePath, not both.";
+
+    /// <summary>The description of the file path parameter of the tools that add an attachment.</summary>
+    internal const string FilePathDescription =
+        "The full path of a local file to upload, such as C:\\Users\\me\\Pictures\\screenshot.png. A file outside the folders the user allowed is uploaded only if the user approves it when asked. Pass filePath or base64Content, not both.";
+
     private readonly JiraClient jira;
+    private readonly AttachmentReader reader;
+    private readonly Func<McpServer, IUploadApproval> approvals;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="AttachmentTools"/> class.
     /// </summary>
     /// <param name="jira">The Jira client.</param>
-    public AttachmentTools(JiraClient jira)
+    /// <param name="reader">Reads the content of a file to attach.</param>
+    /// <param name="approvals">Creates the way to ask the user about a file, for the current tool call.</param>
+    public AttachmentTools(JiraClient jira, AttachmentReader reader, Func<McpServer, IUploadApproval> approvals)
     {
         this.jira = jira;
+        this.reader = reader;
+        this.approvals = approvals;
     }
 
     /// <summary>
@@ -100,21 +118,31 @@ public sealed class AttachmentTools
     /// <param name="issueKey">The issue key or ID.</param>
     /// <param name="fileName">The file name, with its extension.</param>
     /// <param name="base64Content">The file content, encoded as base64.</param>
+    /// <param name="filePath">The full path of a local file to upload.</param>
+    /// <param name="server">The MCP server handling the call, used to ask the user about a file outside the allowed folders.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The new attachment.</returns>
     [McpServerTool(Name = "atlassian_jira_add_attachment", OpenWorld = true)]
-    [Description("Attaches a file to the specified Jira issue. The content is passed as base64.")]
+    [Description("Attaches a file to the specified Jira issue. Pass the content as filePath, the full path of a local file, or as base64Content. Prefer filePath for any existing file, such as a screenshot or a log: it needs no encoding. A file outside the folders the user allowed (atlassian_jira_get_configuration lists them) is uploaded only if the user approves it in a prompt the server shows; you do not need to ask first.")]
     public async Task<string> Add(
         [Description("The issue key, such as PROJ-123, or the issue ID.")] string issueKey,
-        [Description("The file name, with its extension, such as screenshot.png.")] string fileName,
-        [Description("The file content, encoded as base64.")] string base64Content,
-        CancellationToken cancellationToken)
+        [Description(FileNameDescription)] string? fileName = null,
+        [Description(Base64ContentDescription)] string? base64Content = null,
+        [Description(FilePathDescription)] string? filePath = null,
+        McpServer server = null!,
+        CancellationToken cancellationToken = default)
     {
-        byte[] content = DecodeBase64(base64Content);
+        (string name, byte[] content) = await this.reader.ReadAsync(
+            fileName,
+            base64Content,
+            filePath,
+            $"Jira issue {issueKey.Trim()}",
+            this.approvals(server),
+            cancellationToken);
 
         JsonNode? attachments = await this.jira.Http.UploadAsync(
             JiraClient.PlatformPath + $"issue/{JiraClient.Segment(issueKey)}/attachments",
-            fileName,
+            name,
             content,
             formFields: null,
             cancellationToken);
@@ -136,30 +164,5 @@ public sealed class AttachmentTools
     {
         await this.jira.SendAsync(HttpMethod.Delete, $"attachment/{JiraClient.Segment(attachmentId)}", body: null, cancellationToken);
         return ToolResult.Success($"Deleted attachment {attachmentId}.");
-    }
-
-    /// <summary>
-    /// Decodes base64 content, accepting a data URL prefix such as <c>data:image/png;base64,</c>.
-    /// </summary>
-    /// <param name="base64Content">The content.</param>
-    /// <returns>The bytes.</returns>
-    /// <exception cref="McpException">The content is not valid base64.</exception>
-    internal static byte[] DecodeBase64(string base64Content)
-    {
-        string text = base64Content.Trim();
-        int comma = text.IndexOf(',', StringComparison.Ordinal);
-        if (text.StartsWith("data:", StringComparison.OrdinalIgnoreCase) && comma >= 0)
-        {
-            text = text[(comma + 1)..];
-        }
-
-        try
-        {
-            return Convert.FromBase64String(text);
-        }
-        catch (FormatException exception)
-        {
-            throw new McpException("The base64Content parameter is not valid base64.", exception);
-        }
     }
 }

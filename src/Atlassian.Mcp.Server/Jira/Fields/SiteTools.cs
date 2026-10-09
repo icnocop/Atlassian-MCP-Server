@@ -5,6 +5,7 @@
 using System.ComponentModel;
 using System.Text.Json.Nodes;
 using Atlassian.Mcp.Server.Common;
+using Atlassian.Mcp.Server.Common.Attachments;
 using Atlassian.Mcp.Server.Configuration;
 using ModelContextProtocol.Server;
 
@@ -19,16 +20,19 @@ public sealed class SiteTools
 {
     private readonly JiraClient jira;
     private readonly AtlassianOptions options;
+    private readonly AttachmentFolderStore attachmentFolders;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="SiteTools"/> class.
     /// </summary>
     /// <param name="jira">The Jira client.</param>
     /// <param name="options">The server options.</param>
-    public SiteTools(JiraClient jira, AtlassianOptions options)
+    /// <param name="attachmentFolders">The folders the user chose to always allow uploads from.</param>
+    public SiteTools(JiraClient jira, AtlassianOptions options, AttachmentFolderStore attachmentFolders)
     {
         this.jira = jira;
         this.options = options;
+        this.attachmentFolders = attachmentFolders;
     }
 
     /// <summary>
@@ -69,7 +73,7 @@ public sealed class SiteTools
     /// </summary>
     /// <returns>The configuration.</returns>
     [McpServerTool(Name = "atlassian_jira_get_configuration", ReadOnly = true, Idempotent = true)]
-    [Description("Gets the configuration of this MCP server: site URL, account email, enabled toolsets and tools, and whether it is read-only. The API token is never returned.")]
+    [Description("Gets the configuration of this MCP server: site URL, account email, enabled toolsets and tools, whether it is read-only, and the folders whose files may be attached by path without asking the user. The API token is never returned.")]
     public string GetConfiguration()
         => ToolResult.Json(new
         {
@@ -79,6 +83,9 @@ public sealed class SiteTools
             toolsets = this.options.Toolsets.Order(StringComparer.Ordinal).ToArray(),
             enabledTools = this.options.EnabledTools.Order(StringComparer.Ordinal).ToArray(),
             readOnly = this.options.ReadOnly,
+            attachmentFolders = this.options.AttachmentFolders,
+            savedAttachmentFolders = this.attachmentFolders.Load(),
+            savedAttachmentFoldersFile = this.attachmentFolders.FilePath,
             serverVersion = ServerInfo.Version,
         });
 }

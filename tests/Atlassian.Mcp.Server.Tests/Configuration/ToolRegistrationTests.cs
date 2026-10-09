@@ -4,6 +4,7 @@
 
 using System.Reflection;
 using Atlassian.Mcp.Server.Configuration;
+using ModelContextProtocol.Server;
 
 namespace Atlassian.Mcp.Server.Tests.Configuration;
 
@@ -35,7 +36,7 @@ public sealed class ToolRegistrationTests
     }
 
     /// <summary>
-    /// Verifies that every tool and every one of its parameters has a description for the model.
+    /// Verifies that every tool and every one of its parameters that the model fills in has a description for the model.
     /// </summary>
     [TestMethod]
     public void Discover_EveryToolAndParameter_HasDescription()
@@ -47,7 +48,9 @@ public sealed class ToolRegistrationTests
         foreach (ToolDescriptor tool in tools)
         {
             Assert.IsNotNull(tool.Method.GetCustomAttribute<System.ComponentModel.DescriptionAttribute>(), tool.Name);
-            foreach (ParameterInfo parameter in tool.Method.GetParameters().Where(parameter => parameter.ParameterType != typeof(CancellationToken)))
+
+            // The SDK supplies the cancellation token and the server handling the call; the model never sees them.
+            foreach (ParameterInfo parameter in tool.Method.GetParameters().Where(parameter => parameter.ParameterType != typeof(CancellationToken) && parameter.ParameterType != typeof(McpServer)))
             {
                 Assert.IsNotNull(parameter.GetCustomAttribute<System.ComponentModel.DescriptionAttribute>(), $"{tool.Name}.{parameter.Name}");
             }

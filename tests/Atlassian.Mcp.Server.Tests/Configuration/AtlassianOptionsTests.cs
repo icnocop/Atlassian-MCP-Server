@@ -103,11 +103,58 @@ public sealed class AtlassianOptionsTests
         StringAssert.Contains(errors[0], "unknown toolset 'bogus'", StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// Verifies that no folder is allowed for uploads by path unless the variable is set.
+    /// </summary>
+    [TestMethod]
+    public void FromEnvironment_WithoutAttachmentFolders_AllowsNone()
+    {
+        // Act
+        AtlassianOptions options = AtlassianOptions.FromEnvironment(Variables(), out _)!;
+
+        // Assert
+        Assert.AreEqual(0, options.AttachmentFolders.Count);
+    }
+
+    /// <summary>
+    /// Verifies that attachment folders are split on the path separator and stored as full paths without a trailing separator.
+    /// </summary>
+    [TestMethod]
+    public void FromEnvironment_WithAttachmentFolders_ReadsFullPaths()
+    {
+        // Arrange
+        string first = Path.Combine(Path.GetTempPath(), "first");
+        string second = Path.Combine(Path.GetTempPath(), "second");
+
+        // Act
+        AtlassianOptions options = AtlassianOptions.FromEnvironment(
+            Variables(attachmentFolders: $" {first}{Path.DirectorySeparatorChar} {Path.PathSeparator}{Path.PathSeparator}{second}"),
+            out _)!;
+
+        // Assert
+        CollectionAssert.AreEqual(new[] { first, second }, options.AttachmentFolders.ToArray());
+    }
+
+    /// <summary>
+    /// Verifies that a relative attachment folder is reported.
+    /// </summary>
+    [TestMethod]
+    public void FromEnvironment_WithRelativeAttachmentFolder_ReportsError()
+    {
+        // Act
+        AtlassianOptions? options = AtlassianOptions.FromEnvironment(Variables(attachmentFolders: "screenshots"), out IReadOnlyList<string> errors);
+
+        // Assert
+        Assert.IsNull(options);
+        StringAssert.Contains(errors[0], "'screenshots' is not a full path", StringComparison.Ordinal);
+    }
+
     private static Func<string, string?> Variables(
         string siteUrl = "https://example.atlassian.net",
         string? toolsets = null,
         string? enabledTools = null,
-        string? readOnly = null)
+        string? readOnly = null,
+        string? attachmentFolders = null)
     {
         var values = new Dictionary<string, string?>
         {
@@ -117,6 +164,7 @@ public sealed class AtlassianOptionsTests
             [AtlassianOptions.ToolsetsVariable] = toolsets,
             [AtlassianOptions.EnabledToolsVariable] = enabledTools,
             [AtlassianOptions.ReadOnlyVariable] = readOnly,
+            [AtlassianOptions.AttachmentFoldersVariable] = attachmentFolders,
         };
 
         return name => values.GetValueOrDefault(name);

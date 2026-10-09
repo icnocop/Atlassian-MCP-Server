@@ -3,6 +3,7 @@
 // </copyright>
 
 using System.Text.Json.Nodes;
+using Atlassian.Mcp.Server.Common.Attachments;
 using Atlassian.Mcp.Server.Configuration;
 using Atlassian.Mcp.Server.Jira;
 using Atlassian.Mcp.Server.Jira.Fields;
@@ -35,7 +36,10 @@ public sealed class SiteToolsTests
             new HashSet<string> { Toolsets.JiraFields, Toolsets.JiraIssues },
             new HashSet<string>(),
             readOnly: true);
-        this.tools = new SiteTools(new JiraClient(this.http), options);
+
+        // The file is never created, so no folders are saved.
+        var store = new AttachmentFolderStore(Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"), "attachment-folders.json"));
+        this.tools = new SiteTools(new JiraClient(this.http), options, store);
     }
 
     /// <summary>
@@ -55,6 +59,8 @@ public sealed class SiteToolsTests
         Assert.AreEqual("user@example.com", configuration["email"]!.GetValue<string>());
         Assert.IsTrue(configuration["readOnly"]!.GetValue<bool>());
         Assert.AreEqual(2, configuration["toolsets"]!.AsArray().Count);
+        Assert.IsNull(configuration["savedAttachmentFolders"], "An empty list is pruned from tool results.");
+        StringAssert.EndsWith(configuration["savedAttachmentFoldersFile"]!.GetValue<string>(), "attachment-folders.json", StringComparison.Ordinal);
     }
 
     /// <summary>

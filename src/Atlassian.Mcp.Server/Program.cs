@@ -4,6 +4,7 @@
 
 using System.Text;
 using Atlassian.Mcp.Server.Common;
+using Atlassian.Mcp.Server.Common.Attachments;
 using Atlassian.Mcp.Server.Common.Http;
 using Atlassian.Mcp.Server.Configuration;
 using Atlassian.Mcp.Server.Confluence;
@@ -12,6 +13,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Protocol;
+using ModelContextProtocol.Server;
 
 UseUtf8Console();
 
@@ -36,6 +38,9 @@ builder.Logging.AddConsole(console => console.LogToStandardErrorThreshold = LogL
 
 builder.Services.AddSingleton(options);
 builder.Services.AddSingleton<JiraMetadataCache>();
+builder.Services.AddSingleton(new AttachmentFolderStore(AttachmentFolderStore.DefaultFilePath));
+builder.Services.AddSingleton<AttachmentReader>();
+builder.Services.AddSingleton<Func<McpServer, IUploadApproval>>(_ => server => new ElicitationUploadApproval(server));
 builder.Services.AddHttpClient<AtlassianHttpClient>(http => AtlassianHttpClient.Configure(http, options));
 builder.Services.AddTransient<JiraClient>();
 builder.Services.AddTransient<ConfluenceClient>();

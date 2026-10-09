@@ -28,6 +28,12 @@ public sealed class AtlassianOptions
     public const string ReadOnlyVariable = "ATLASSIAN_READ_ONLY";
 
     /// <summary>
+    /// The variable that holds the folders whose files may be uploaded as attachments by path, separated
+    /// by <see cref="Path.PathSeparator"/> (<c>;</c> on Windows, <c>:</c> elsewhere) like <c>PATH</c>.
+    /// </summary>
+    public const string AttachmentFoldersVariable = "ATLASSIAN_ATTACHMENT_FOLDERS";
+
+    /// <summary>
     /// Initializes a new instance of the <see cref="AtlassianOptions"/> class.
     /// </summary>
     /// <param name="siteUrl">The site URL, such as <c>https://example.atlassian.net/</c>.</param>
@@ -36,13 +42,15 @@ public sealed class AtlassianOptions
     /// <param name="toolsets">The toolsets to enable.</param>
     /// <param name="enabledTools">The tool names to enable, or an empty set to enable every tool in <paramref name="toolsets"/>.</param>
     /// <param name="readOnly">A value indicating whether tools that change data are hidden.</param>
+    /// <param name="attachmentFolders">The full paths of the folders whose files may be uploaded by path, or <see langword="null"/> for none.</param>
     public AtlassianOptions(
         Uri siteUrl,
         string email,
         string apiToken,
         IReadOnlySet<string> toolsets,
         IReadOnlySet<string> enabledTools,
-        bool readOnly)
+        bool readOnly,
+        IReadOnlyList<string>? attachmentFolders = null)
     {
         this.SiteUrl = siteUrl;
         this.Email = email;
@@ -50,6 +58,7 @@ public sealed class AtlassianOptions
         this.Toolsets = toolsets;
         this.EnabledTools = enabledTools;
         this.ReadOnly = readOnly;
+        this.AttachmentFolders = attachmentFolders ?? [];
     }
 
     /// <summary>Gets the site URL. It always ends with a slash.</summary>
@@ -69,6 +78,12 @@ public sealed class AtlassianOptions
 
     /// <summary>Gets a value indicating whether tools that change data are hidden.</summary>
     public bool ReadOnly { get; }
+
+    /// <summary>
+    /// Gets the full paths of the folders whose files may be uploaded as attachments by path. An empty
+    /// list turns uploading by path off.
+    /// </summary>
+    public IReadOnlyList<string> AttachmentFolders { get; }
 
     /// <summary>
     /// Reads the options from environment variables.
@@ -95,6 +110,7 @@ public sealed class AtlassianOptions
         HashSet<string> toolsets = Configuration.Toolsets.Parse(getVariable(ToolsetsVariable), messages);
         HashSet<string> enabledTools = SplitList(getVariable(EnabledToolsVariable));
         bool readOnly = string.Equals(getVariable(ReadOnlyVariable)?.Trim(), "true", StringComparison.OrdinalIgnoreCase);
+        List<string> attachmentFolders = ParseFolders(getVariable(AttachmentFoldersVariable), messages);
 
         errors = messages;
         if (messages.Count > 0)
@@ -102,7 +118,7 @@ public sealed class AtlassianOptions
             return null;
         }
 
-        return new AtlassianOptions(siteUrl!, email!, apiToken!, toolsets, enabledTools, readOnly);
+        return new AtlassianOptions(siteUrl!, email!, apiToken!, toolsets, enabledTools, readOnly, attachmentFolders);
     }
 
     /// <summary>
@@ -138,5 +154,24 @@ public sealed class AtlassianOptions
         // Only the site root is meaningful: Jira and Confluence paths are appended to it, so a URL
         // copied from the browser (for example ".../wiki/home" or ".../jira/your-work") is trimmed.
         return new Uri(uri.GetLeftPart(UriPartial.Authority) + "/");
+    }
+
+    private static List<string> ParseFolders(string? value, List<string> messages)
+    {
+        var folders = new List<string>();
+        foreach (string entry in (value ?? string.Empty).Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            // A relative folder would be resolved against whatever folder the client starts the server
+            // in, which differs between clients, so only a fully qualified path is accepted.
+            if (!Path.IsPathFullyQualified(entry))
+            {
+                messages.Add($"The {AttachmentFoldersVariable} environment variable must list full paths, separated by '{Path.PathSeparator}'. '{entry}' is not a full path.");
+                continue;
+            }
+
+            folders.Add(Path.TrimEndingDirectorySeparator(Path.GetFullPath(entry)));
+        }
+
+        return folders;
     }
 }

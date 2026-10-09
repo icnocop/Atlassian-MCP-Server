@@ -3,6 +3,7 @@
 // </copyright>
 
 using System.Text.Json.Nodes;
+using Atlassian.Mcp.Server.Common.Attachments;
 using Atlassian.Mcp.Server.Common.Http;
 using Atlassian.Mcp.Server.Configuration;
 using Atlassian.Mcp.Server.Confluence;
@@ -55,7 +56,7 @@ public sealed class LiveSiteTests : IDisposable
     public async Task CheckConnection_WithConfiguredSite_ReportsOk()
     {
         // Act
-        string result = await new SiteTools(new JiraClient(this.http), this.options).CheckConnection();
+        string result = await new SiteTools(new JiraClient(this.http), this.options, new AttachmentFolderStore(AttachmentFolderStore.DefaultFilePath)).CheckConnection();
 
         // Assert
         Assert.IsTrue(JsonNode.Parse(result)!["ok"]!.GetValue<bool>());
