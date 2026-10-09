@@ -111,4 +111,26 @@ public sealed class AttachmentTools
 
         return ToolResult.Json(result?["results"] ?? result);
     }
+
+    /// <summary>
+    /// Deletes the specified attachment, moving it to the trash of its page's space.
+    /// </summary>
+    /// <param name="attachmentId">The attachment ID.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>A confirmation.</returns>
+    /// <remarks>
+    /// Confluence deletes a current attachment by moving it to the trash, from where a space administrator can restore
+    /// it; only a second request with <c>purge=true</c> on the trashed attachment deletes it permanently, and this tool
+    /// never sends one.
+    /// </remarks>
+    [McpServerTool(Name = "atlassian_confluence_delete_attachment", Destructive = true, OpenWorld = true)]
+    [Toolset(Toolsets.ConfluenceAdmin)]
+    [Description("Deletes the specified Confluence attachment, with all of its versions. It goes to the space's trash, where a space administrator can restore it; it is never deleted permanently. The deletion is not part of a draft: it takes effect on the published page at once, and every version of the page that shows the file, including earlier versions in the page history, shows it as missing while it is in the trash.")]
+    public async Task<string> Delete(
+        [Description("The attachment ID, such as att1234567, from atlassian_confluence_get_attachments.")] string attachmentId,
+        CancellationToken cancellationToken = default)
+    {
+        await this.confluence.SendAsync(HttpMethod.Delete, $"attachments/{Uri.EscapeDataString(attachmentId.Trim())}", body: null, cancellationToken);
+        return ToolResult.Success($"Moved attachment {attachmentId.Trim()} to the trash.");
+    }
 }

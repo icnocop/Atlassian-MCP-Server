@@ -27,7 +27,7 @@ A [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that le
 - **Safe editing**: edit one section of a page and keep everything else, including macros and smart links; edits that would lose content Markdown cannot represent are refused.
 - **Pages**: read pages as Markdown or ADF, create, update, publish, move, and delete them, and browse children and version history.
 - **Search**: CQL search across spaces.
-- **Spaces, comments, attachments, and labels**.
+- **Spaces, comments, attachments, and labels**: upload, list, and delete attachments (deleting moves an attachment to the space's trash, and needs the opt-in `confluence-admin` toolset).
 
 Tools are grouped into [toolsets](#configuration) so you can enable only what you need. See the [full list of tools](docs/tools.md).
 
@@ -101,7 +101,7 @@ List or always allow only folders whose files you are willing to share, such as 
 | `jira-fields` | Fields, issue types, priorities, statuses, resolutions, and connection checks |
 | `jira-admin` | Creating, updating, and deleting projects, and group membership |
 | `confluence` | Pages, drafts, search, spaces, comments, attachments, and labels |
-| `confluence-admin` | Deleting pages. Not included in `all`; enable it explicitly. |
+| `confluence-admin` | Deleting pages and attachments. Not included in `all`; enable it explicitly. |
 
 Some clients limit how many tools they send to the model; GitHub Copilot allows about 128. The guides show a toolset selection that stays under that limit.
 

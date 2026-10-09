@@ -121,6 +121,29 @@ public sealed class ToolRegistrationTests
         Assert.IsTrue(withAdmin.Any(tool => tool.Name == "atlassian_confluence_delete_page"));
     }
 
+    /// <summary>
+    /// Verifies that deleting Confluence attachments is only available when the opt-in toolset is enabled, even though
+    /// the other attachment tools are in the default Confluence toolset, and that it is never available in read-only mode.
+    /// </summary>
+    [TestMethod]
+    public void Select_ConfluenceDeleteAttachment_OnlyWithConfluenceAdmin()
+    {
+        // Arrange
+        IReadOnlyList<ToolDescriptor> tools = ToolRegistration.Discover();
+        HashSet<string> defaults = Toolsets.Parse(null, []);
+
+        // Act
+        IReadOnlyList<ToolDescriptor> byDefault = ToolRegistration.Select(tools, Options(defaults));
+        IReadOnlyList<ToolDescriptor> withAdmin = ToolRegistration.Select(tools, Options(Toolsets.Known));
+        IReadOnlyList<ToolDescriptor> readOnly = ToolRegistration.Select(tools, Options(Toolsets.Known, readOnly: true));
+
+        // Assert
+        Assert.IsTrue(byDefault.Any(tool => tool.Name == "atlassian_confluence_get_attachments"));
+        Assert.IsFalse(byDefault.Any(tool => tool.Name == "atlassian_confluence_delete_attachment"));
+        Assert.IsTrue(withAdmin.Any(tool => tool.Name == "atlassian_confluence_delete_attachment"));
+        Assert.IsFalse(readOnly.Any(tool => tool.Name == "atlassian_confluence_delete_attachment"));
+    }
+
     private static AtlassianOptions Options(IEnumerable<string> toolsets, IEnumerable<string>? enabledTools = null, bool readOnly = false)
         => new(
             new Uri("https://example.atlassian.net/"),
