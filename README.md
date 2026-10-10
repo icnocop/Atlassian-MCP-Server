@@ -53,7 +53,8 @@ The server acts as you: it can see and change only what your account can, and ev
    - [GitHub Copilot in Visual Studio Code](docs/vscode-copilot.md)
    - [GitHub Copilot in Visual Studio](docs/visual-studio-copilot.md)
    - [GitHub Copilot CLI](docs/copilot-cli.md)
-   If your workspace has a `global.json` that pins an older .NET SDK, `dnx` cannot run there, because clients start the server in the workspace folder. Install the server as a global tool instead, from a folder without that `global.json`: `dotnet tool install --global Atlassian.Mcp.Server`. Then use `atlassian-mcp-server` as the command, and update it with `dotnet tool update --global Atlassian.Mcp.Server`.
+
+   If the server does not start, see [Troubleshooting](docs/troubleshooting.md).
 3. **Try it.** Ask your assistant, for example:
    - "Show me my open Jira issues in project PROJ."
    - "Create a bug in PROJ for the login timeout, with steps to reproduce."
@@ -108,6 +109,7 @@ Some clients limit how many tools they send to the model; GitHub Copilot allows 
 ## More information
 
 - [Tools](docs/tools.md)
+- [Troubleshooting](docs/troubleshooting.md)
 - [Contributing](CONTRIBUTING.md)
 - [Changes](CHANGELOG.md)
 
