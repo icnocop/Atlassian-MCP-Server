@@ -14,8 +14,9 @@ public static class AdfInspector
 {
     /// <summary>
     /// The node types that a round trip through Markdown loses or changes: macros and other
-    /// extensions, media, smart links shown as cards, mentions, panels, expands, layouts, status
-    /// lozenges, dates, emoji, and task and decision lists.
+    /// extensions, media, smart links shown as cards, panels, expands, layouts, status lozenges,
+    /// dates, emoji, and task and decision lists. Mentions are not lossy: they are written as
+    /// <c>@[Display Name](accountid:ID)</c>, which converts back to the same mention.
     /// </summary>
     private static readonly HashSet<string> LossyTypes = new(StringComparer.Ordinal)
     {
@@ -30,7 +31,6 @@ public static class AdfInspector
         "inlineCard",
         "blockCard",
         "embedCard",
-        "mention",
         "panel",
         "expand",
         "nestedExpand",

@@ -45,9 +45,13 @@ public static class ConfluenceContent
     /// </summary>
     /// <param name="body">The content, in <paramref name="bodyFormat"/>.</param>
     /// <param name="bodyFormat">markdown, adf, or storage.</param>
+    /// <param name="references">
+    /// For Markdown, the resolved mentions, from <see cref="ConfluenceClient.ResolveReferencesAsync"/>;
+    /// or <see langword="null"/>.
+    /// </param>
     /// <returns>The body object, with its representation and value.</returns>
     /// <exception cref="McpException">The ADF is not a valid JSON document.</exception>
-    public static JsonObject ToRequestBody(string body, string bodyFormat)
+    public static JsonObject ToRequestBody(string body, string bodyFormat, AdfReferences? references = null)
     {
         switch (NormalizeFormat(bodyFormat))
         {
@@ -63,8 +67,29 @@ public static class ConfluenceContent
                 return new JsonObject { ["representation"] = AdfRepresentation, ["value"] = body };
 
             default:
-                return new JsonObject { ["representation"] = AdfRepresentation, ["value"] = MarkdownToAdf.Convert(body).ToJsonString() };
+                return new JsonObject { ["representation"] = AdfRepresentation, ["value"] = MarkdownToAdf.Convert(body, references).ToJsonString() };
         }
+    }
+
+    /// <summary>
+    /// Builds the request body object for page or comment content, first resolving the names of
+    /// the mentions in a Markdown body to account IDs.
+    /// </summary>
+    /// <param name="confluence">The client that searches for the mentioned users.</param>
+    /// <param name="body">The content, in <paramref name="bodyFormat"/>.</param>
+    /// <param name="bodyFormat">markdown, adf, or storage.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The body object, with its representation and value.</returns>
+    /// <exception cref="McpException">The ADF is not a valid JSON document, or a mention matches no user or more than one.</exception>
+    public static async Task<JsonObject> ToRequestBodyAsync(ConfluenceClient confluence, string body, string bodyFormat, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(confluence);
+
+        AdfReferences? references = NormalizeFormat(bodyFormat) == "markdown"
+            ? await confluence.ResolveReferencesAsync([body], cancellationToken)
+            : null;
+
+        return ToRequestBody(body, bodyFormat, references);
     }
 
     /// <summary>

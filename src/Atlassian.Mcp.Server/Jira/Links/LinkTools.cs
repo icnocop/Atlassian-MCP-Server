@@ -94,7 +94,7 @@ public sealed class LinkTools
 
         if (!string.IsNullOrWhiteSpace(comment))
         {
-            request["comment"] = new JsonObject { ["body"] = JiraClient.ToAdf(comment) };
+            request["comment"] = new JsonObject { ["body"] = await this.jira.ToAdfAsync(comment, cancellationToken) };
         }
 
         await this.jira.SendAsync(HttpMethod.Post, "issueLink", request, cancellationToken);

@@ -18,9 +18,20 @@ namespace Atlassian.Mcp.Server.Common.Adf;
 /// placeholders are not converted back: writing the Markdown back to Atlassian would lose that
 /// content, which is why <see cref="AdfInspector"/> exists.
 /// </para>
+/// <para>
+/// An embedded file is written as <c>![name](attachment:ID)</c>, which <see cref="MarkdownToAdf"/>
+/// reads back, when the caller supplies the attachment that each media node shows (Jira's media
+/// nodes name the file in the media service, not the attachment). Otherwise it is a placeholder.
+/// </para>
 /// </summary>
 public static class AdfToMarkdown
 {
+    /// <summary>The attribute that <see cref="Annotate"/> adds to a media node for its attachment ID.</summary>
+    private const string AttachmentIdAttribute = "mcp:attachmentId";
+
+    /// <summary>The attribute that <see cref="Annotate"/> adds to a media node for its file name.</summary>
+    private const string FileNameAttribute = "mcp:fileName";
+
     /// <summary>
     /// Returns <see langword="true"/> when <paramref name="node"/> is an ADF document.
     /// </summary>
@@ -40,6 +51,27 @@ public static class AdfToMarkdown
         WriteBlock(writer, node, prefix: string.Empty);
         return writer.ToString().TrimEnd('\n', ' ');
     }
+
+    /// <summary>
+    /// Converts an ADF document, or any ADF node, to Markdown, writing each media node whose media
+    /// ID is in <paramref name="attachments"/> as <c>![name](attachment:ID)</c>.
+    /// </summary>
+    /// <param name="node">The document or node.</param>
+    /// <param name="attachments">The attachment that each media ID shows, or <see langword="null"/>.</param>
+    /// <returns>The Markdown text, without trailing line breaks.</returns>
+    public static string Convert(JsonNode? node, IReadOnlyDictionary<string, AttachmentReference>? attachments)
+        => Convert(Annotate(node, attachments));
+
+    /// <summary>
+    /// Returns a copy of <paramref name="node"/> with every ADF document inside it replaced by its
+    /// Markdown text, as <see cref="ConvertDocuments(JsonNode?)"/> does, writing each media node
+    /// whose media ID is in <paramref name="attachments"/> as <c>![name](attachment:ID)</c>.
+    /// </summary>
+    /// <param name="node">The response.</param>
+    /// <param name="attachments">The attachment that each media ID shows, or <see langword="null"/>.</param>
+    /// <returns>The converted copy.</returns>
+    public static JsonNode? ConvertDocuments(JsonNode? node, IReadOnlyDictionary<string, AttachmentReference>? attachments)
+        => ConvertDocuments(Annotate(node, attachments));
 
     /// <summary>
     /// Returns a copy of <paramref name="node"/> with every ADF document inside it, at any depth,
@@ -147,9 +179,30 @@ public static class AdfToMarkdown
 
             case "mediaSingle":
             case "mediaGroup":
-                foreach (JsonNode? media in block["content"] as JsonArray ?? [])
+                // Files that are written back share one paragraph, which MarkdownToAdf reads back
+                // into one mediaGroup; an image or video is a paragraph of its own.
+                var run = new List<string>();
+                bool single = TypeOf(block) == "mediaSingle";
+                foreach (JsonObject media in (block["content"] as JsonArray ?? []).OfType<JsonObject>())
                 {
-                    WriteLines(writer, prefix, Placeholder(media as JsonObject));
+                    if (EmbeddedAttachment(media, single) is { } markdown)
+                    {
+                        run.Add(markdown);
+                        continue;
+                    }
+
+                    if (run.Count > 0)
+                    {
+                        WriteLines(writer, prefix, string.Join("\n", run));
+                        run.Clear();
+                    }
+
+                    WriteLines(writer, prefix, Placeholder(media));
+                }
+
+                if (run.Count > 0)
+                {
+                    WriteLines(writer, prefix, string.Join("\n", run));
                 }
 
                 break;
@@ -262,7 +315,7 @@ public static class AdfToMarkdown
                     text.Append("  \n");
                     break;
                 case "mention":
-                    text.Append('@').Append((Attribute<string>(node, "text") ?? Attribute<string>(node, "id") ?? string.Empty).TrimStart('@'));
+                    text.Append(Mention(node));
                     break;
                 case "emoji":
                     text.Append(Attribute<string>(node, "text") ?? Attribute<string>(node, "shortName") ?? string.Empty);
@@ -358,6 +411,94 @@ public static class AdfToMarkdown
         }
 
         return $"<!-- {string.Join(' ', parts)} -->";
+    }
+
+    /// <summary>
+    /// Writes a mention as <c>@[Display Name](accountid:ID)</c>, the syntax
+    /// <see cref="MarkdownToAdf"/> reads back into the same mention. A mention without an account ID
+    /// cannot be written back, so it becomes plain <c>@Display Name</c>.
+    /// </summary>
+    private static string Mention(JsonObject node)
+    {
+        string? id = Attribute<string>(node, "id");
+        string name = (Attribute<string>(node, "text") ?? id ?? string.Empty).TrimStart('@');
+        if (string.IsNullOrEmpty(id))
+        {
+            return "@" + name;
+        }
+
+        // A closing bracket would end the name early when the Markdown is read back, so it is dropped.
+        name = name.Replace("]", string.Empty, StringComparison.Ordinal).Trim();
+        return $"@[{(name.Length == 0 ? id : name)}](accountid:{id})";
+    }
+
+    /// <summary>
+    /// Writes a media node that <see cref="Annotate"/> matched to an attachment as
+    /// <c>![name](attachment:ID)</c>; or returns <see langword="null"/> for one it did not.
+    /// The name is the image's alternative text when it has one, and the file name otherwise.
+    /// </summary>
+    private static string? EmbeddedAttachment(JsonObject media, bool single)
+    {
+        string? attachmentId = Attribute<string>(media, AttachmentIdAttribute);
+        if (string.IsNullOrEmpty(attachmentId))
+        {
+            return null;
+        }
+
+        string? alt = Attribute<string>(media, "alt");
+        string fileName = Attribute<string>(media, FileNameAttribute) ?? string.Empty;
+        string name = single && !string.IsNullOrWhiteSpace(alt) ? alt : (fileName.Length > 0 ? fileName : alt ?? string.Empty);
+
+        // A closing bracket would end the name early when the Markdown is read back, so it is dropped.
+        return $"![{name.Replace("]", string.Empty, StringComparison.Ordinal).Trim()}](attachment:{attachmentId})";
+    }
+
+    /// <summary>
+    /// Returns a copy of <paramref name="node"/> in which every media node whose ID is in
+    /// <paramref name="attachments"/> carries its attachment ID and file name as extra attributes,
+    /// for <see cref="EmbeddedAttachment"/>. The copy is only converted, never sent to Atlassian.
+    /// </summary>
+    private static JsonNode? Annotate(JsonNode? node, IReadOnlyDictionary<string, AttachmentReference>? attachments)
+    {
+        if (node is null || attachments is null || attachments.Count == 0)
+        {
+            return node;
+        }
+
+        JsonNode copy = node.DeepClone();
+        AnnotateInPlace(copy, attachments);
+        return copy;
+    }
+
+    private static void AnnotateInPlace(JsonNode? node, IReadOnlyDictionary<string, AttachmentReference> attachments)
+    {
+        switch (node)
+        {
+            case JsonObject item:
+                if (TypeOf(item) == "media"
+                    && item["attrs"] is JsonObject attrs
+                    && Attribute<string>(item, "id") is { } mediaId
+                    && attachments.TryGetValue(mediaId, out AttachmentReference? attachment))
+                {
+                    attrs[AttachmentIdAttribute] = attachment.AttachmentId;
+                    attrs[FileNameAttribute] = attachment.FileName;
+                }
+
+                foreach ((_, JsonNode? value) in item)
+                {
+                    AnnotateInPlace(value, attachments);
+                }
+
+                break;
+
+            case JsonArray items:
+                foreach (JsonNode? child in items)
+                {
+                    AnnotateInPlace(child, attachments);
+                }
+
+                break;
+        }
     }
 
     private static string TypeOf(JsonObject node) => node["type"] is JsonValue type && type.TryGetValue(out string? text) ? text : string.Empty;

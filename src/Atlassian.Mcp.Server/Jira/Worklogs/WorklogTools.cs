@@ -146,7 +146,7 @@ public sealed class WorklogTools
         {
             timeSpent,
             started = FormatStarted(started, this.Clock),
-            comment = JiraClient.ToAdf(comment),
+            comment = await this.jira.ToAdfAsync(comment, cancellationToken),
         };
 
         return ToolResult.Json(await this.jira.SendAsync(HttpMethod.Post, path, body, cancellationToken));
@@ -192,7 +192,7 @@ public sealed class WorklogTools
         {
             timeSpent,
             started = string.IsNullOrWhiteSpace(started) ? null : FormatStarted(started, this.Clock),
-            comment = JiraClient.ToAdf(comment),
+            comment = await this.jira.ToAdfAsync(comment, cancellationToken),
         };
 
         return ToolResult.Json(await this.jira.SendAsync(HttpMethod.Put, path, body, cancellationToken));

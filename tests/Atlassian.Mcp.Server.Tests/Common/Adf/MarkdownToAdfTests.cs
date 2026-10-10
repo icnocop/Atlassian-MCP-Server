@@ -5,6 +5,7 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Atlassian.Mcp.Server.Common.Adf;
+using ModelContextProtocol;
 
 namespace Atlassian.Mcp.Server.Tests.Common.Adf;
 
@@ -592,4 +593,270 @@ public sealed class MarkdownToAdfTests
         Assert.AreEqual("doc", fields["environment"]!["type"]!.GetValue<string>());
         Assert.AreEqual(2, fields["labels"]!.AsArray().Count);
     }
+
+    /// <summary>
+    /// Verifies that a mention with an explicit account ID becomes a mention node between the text around it.
+    /// </summary>
+    [TestMethod]
+    public void Convert_WithMentionWithAccountId_WritesMentionNode()
+    {
+        // Act
+        JsonElement paragraph = AdfNodes.Blocks("Hi @[Jane Doe](accountid:5b10ac8d), please review.")[0];
+
+        // Assert
+        JsonElement[] content = paragraph.GetProperty("content").EnumerateArray().ToArray();
+        Assert.HasCount(3, content);
+        Assert.AreEqual("Hi ", content[0].GetProperty("text").GetString());
+        Assert.AreEqual("mention", AdfNodes.TypeOf(content[1]));
+        Assert.AreEqual("5b10ac8d", content[1].GetProperty("attrs").GetProperty("id").GetString());
+        Assert.AreEqual("@Jane Doe", content[1].GetProperty("attrs").GetProperty("text").GetString());
+        Assert.AreEqual(", please review.", content[2].GetProperty("text").GetString());
+    }
+
+    /// <summary>
+    /// Verifies that a mention written without an account ID takes it from the resolved names.
+    /// </summary>
+    [TestMethod]
+    public void Convert_WithMentionAndResolvedName_WritesMentionNode()
+    {
+        // Arrange
+        var accountIds = new Dictionary<string, string> { ["Jane Doe"] = "abc" };
+
+        // Act
+        JsonObject document = MarkdownToAdf.Convert("@[Jane Doe] and @[Jane Doe]", AdfReferences.ForMentions(accountIds));
+
+        // Assert
+        JsonArray content = document["content"]![0]!["content"]!.AsArray();
+        Assert.AreEqual("abc", content[0]!["attrs"]!["id"]!.GetValue<string>());
+        Assert.AreEqual("abc", content[2]!["attrs"]!["id"]!.GetValue<string>());
+    }
+
+    /// <summary>
+    /// Verifies that a mention whose name was not resolved is refused rather than posted without an account ID.
+    /// </summary>
+    [TestMethod]
+    public void Convert_WithUnresolvedMention_ThrowsInvalidOperationException()
+    {
+        // Act and assert
+        Assert.ThrowsExactly<InvalidOperationException>(() => MarkdownToAdf.Convert("Hi @[Jane Doe]"));
+    }
+
+    /// <summary>
+    /// Verifies that a mention inside bold text, a list item, and a table cell is a mention node
+    /// without the surrounding marks.
+    /// </summary>
+    [TestMethod]
+    public void Convert_WithMentionInsideBoldListAndTable_WritesMentionNodes()
+    {
+        // Arrange
+        const string markdown = """
+            **Owner: @[Jane](accountid:a)**
+
+            - @[Jane](accountid:a)
+
+            | Who |
+            | --- |
+            | @[Jane](accountid:a) |
+            """;
+
+        // Act
+        string json = MarkdownToAdf.Convert(markdown).ToJsonString();
+
+        // Assert
+        Assert.AreEqual(3, json.Split("\"type\":\"mention\"").Length - 1);
+        StringAssert.Contains(json, """{"type":"mention","attrs":{"id":"a","text":"@Jane"}}""", StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Verifies that mention syntax inside a code span or a code block stays literal text.
+    /// </summary>
+    [TestMethod]
+    public void Convert_WithMentionInsideCode_KeepsItLiteral()
+    {
+        // Arrange
+        const string markdown = """
+            Use `@[Jane]` to mention.
+
+            ```
+            @[Jane]
+            ```
+            """;
+
+        // Act
+        string json = MarkdownToAdf.Convert(markdown).ToJsonString();
+
+        // Assert
+        Assert.IsFalse(json.Contains("\"mention\"", StringComparison.Ordinal));
+        Assert.HasCount(0, MarkdownToAdf.FindMentionNames(markdown));
+    }
+
+    /// <summary>
+    /// Verifies that a bare @name, an @ after a word character, and a plain link are not mentions.
+    /// </summary>
+    [TestMethod]
+    public void Convert_WithTextThatIsNotAMention_LeavesItAlone()
+    {
+        // Act
+        JsonElement paragraph = AdfNodes.Blocks("@Jane mail user@[host] or [site](https://example.com)")[0];
+
+        // Assert
+        Assert.IsFalse(paragraph.GetProperty("content").EnumerateArray().Any(node => AdfNodes.TypeOf(node) == "mention"));
+        Assert.AreEqual("@Jane mail user@[host] or site", AdfNodes.TextOf(paragraph));
+    }
+
+    /// <summary>
+    /// Verifies that only the names of mentions without an account ID are returned, once each, in order.
+    /// </summary>
+    [TestMethod]
+    public void FindMentionNames_WithSeveralMentions_ReturnsDistinctNamesToResolve()
+    {
+        // Act
+        IReadOnlyList<string> names = MarkdownToAdf.FindMentionNames("@[Bob] @[Jane Doe](accountid:x) @[ Alice ] @[Bob]");
+
+        // Assert
+        CollectionAssert.AreEqual(new[] { "Bob", "Alice" }, names.ToArray());
+    }
+
+    /// <summary>
+    /// Verifies that the account IDs of mentions in rich-text fields are taken from the resolved names.
+    /// </summary>
+    [TestMethod]
+    public void ConvertRichTextFields_WithMention_UsesTheResolvedAccountId()
+    {
+        // Arrange
+        var fields = new JsonObject { ["customfield_10050"] = "Ask @[Jane]" };
+
+        // Act
+        MarkdownToAdf.ConvertRichTextFields(fields, _ => true, AdfReferences.ForMentions(new Dictionary<string, string> { ["Jane"] = "abc" }));
+
+        // Assert
+        Assert.AreEqual("abc", fields["customfield_10050"]!["content"]![0]!["content"]![1]!["attrs"]!["id"]!.GetValue<string>());
+    }
+
+    /// <summary>
+    /// Verifies that images and videos become a mediaSingle each, that consecutive other files share
+    /// one mediaGroup, and that the text around them stays in paragraphs, as Jira's editor writes them.
+    /// </summary>
+    [TestMethod]
+    public void Convert_WithEmbeddedAttachments_WritesMediaBlocksLikeJira()
+    {
+        // Arrange
+        const string markdown = """
+            Logs and a screenshot:
+
+            ![screenshot](attachment:101)
+            ![](attachment:102)
+            ![logs.zip](attachment:103) ![trace.zip](attachment:104)
+            ![](attachment:105)
+
+            Thanks.
+            """;
+
+        // Act
+        JsonObject document = MarkdownToAdf.Convert(markdown, Attachments());
+
+        // Assert
+        JsonArray blocks = document["content"]!.AsArray();
+        CollectionAssert.AreEqual(
+            new[] { "paragraph", "mediaSingle", "mediaSingle", "mediaGroup", "mediaSingle", "paragraph" },
+            blocks.Select(block => block!["type"]!.GetValue<string>()).ToArray());
+        Assert.AreEqual(
+            """{"type":"mediaSingle","attrs":{"layout":"align-start"},"content":[{"type":"media","attrs":{"type":"file","id":"00000000-0000-0000-0000-000000000101","collection":"","alt":"screenshot"}}]}""",
+            blocks[1]!.ToJsonString());
+        Assert.AreEqual("photo.jpg", blocks[2]!["content"]![0]!["attrs"]!["alt"]!.GetValue<string>());
+        Assert.AreEqual(
+            """{"type":"mediaGroup","content":[{"type":"media","attrs":{"type":"file","id":"00000000-0000-0000-0000-000000000103","collection":""}},{"type":"media","attrs":{"type":"file","id":"00000000-0000-0000-0000-000000000104","collection":""}}]}""",
+            blocks[3]!.ToJsonString());
+        Assert.AreEqual("demo.mp4", blocks[4]!["content"]![0]!["attrs"]!["alt"]!.GetValue<string>());
+    }
+
+    /// <summary>
+    /// Verifies that an attachment in the middle of a paragraph splits it, without leaving the line
+    /// break that separated the text from the attachment.
+    /// </summary>
+    [TestMethod]
+    public void Convert_WithAttachmentInsideParagraph_SplitsTheParagraph()
+    {
+        // Act
+        JsonObject document = MarkdownToAdf.Convert("See the logs:  \n![logs.zip](attachment:103)  \nfor details.", Attachments());
+
+        // Assert
+        JsonArray blocks = document["content"]!.AsArray();
+        Assert.HasCount(3, blocks);
+        Assert.AreEqual("""{"type":"paragraph","content":[{"type":"text","text":"See the logs:"}]}""", blocks[0]!.ToJsonString());
+        Assert.AreEqual("mediaGroup", blocks[1]!["type"]!.GetValue<string>());
+        Assert.AreEqual("""{"type":"paragraph","content":[{"type":"text","text":"for details."}]}""", blocks[2]!.ToJsonString());
+    }
+
+    /// <summary>
+    /// Verifies that an attachment where ADF cannot hold a media block is refused with an explanation.
+    /// </summary>
+    /// <param name="markdown">The Markdown.</param>
+    /// <param name="place">The place the message names.</param>
+    [TestMethod]
+    [DataRow("# Title ![a](attachment:101)", "a heading")]
+    [DataRow("- ![a](attachment:101)", "a list item")]
+    [DataRow("| A |\n| --- |\n| ![a](attachment:101) |", "a table cell")]
+    [DataRow("> ![a](attachment:101)", "a block quote")]
+    public void Convert_WithAttachmentOutsideAParagraph_ThrowsMcpException(string markdown, string place)
+    {
+        // Act
+        McpException exception = Assert.ThrowsExactly<McpException>(() => MarkdownToAdf.Convert(markdown, Attachments()));
+
+        // Assert
+        StringAssert.Contains(exception.Message, $"is inside {place}", StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Verifies that an attachment that was not resolved is refused rather than posted without its media.
+    /// </summary>
+    [TestMethod]
+    public void Convert_WithUnresolvedAttachment_ThrowsInvalidOperationException()
+    {
+        // Act and assert
+        Assert.ThrowsExactly<InvalidOperationException>(() => MarkdownToAdf.Convert("![a](attachment:999)", Attachments()));
+    }
+
+    /// <summary>
+    /// Verifies that only embedded attachments outside code are returned, once each, in order, and
+    /// that ordinary images and links are not attachments.
+    /// </summary>
+    [TestMethod]
+    public void FindAttachmentIds_WithSeveralReferences_ReturnsDistinctIdsOutsideCode()
+    {
+        // Arrange
+        const string markdown = """
+            ![b](attachment:2) ![a](attachment:1)
+
+            `![c](attachment:3)` and [link](https://example.com/x.png) and ![d](https://example.com/d.png)
+
+            ```
+            ![e](attachment:4)
+            ```
+
+            ![b](attachment:2)
+            """;
+
+        // Act
+        IReadOnlyList<string> ids = MarkdownToAdf.FindAttachmentIds(markdown);
+
+        // Assert
+        CollectionAssert.AreEqual(new[] { "2", "1" }, ids.ToArray());
+    }
+
+    /// <summary>
+    /// Returns resolved attachments for the tests: a PNG, a JPEG that Jira recorded as
+    /// binary/octet-stream, two zip files, and a video.
+    /// </summary>
+    private static AdfReferences Attachments()
+        => new(
+            new Dictionary<string, string>(),
+            new Dictionary<string, EmbeddedAttachment>
+            {
+                ["101"] = new("00000000-0000-0000-0000-000000000101", "screenshot.png", "image/png"),
+                ["102"] = new("00000000-0000-0000-0000-000000000102", "photo.jpg", "binary/octet-stream"),
+                ["103"] = new("00000000-0000-0000-0000-000000000103", "logs.zip", "application/zip"),
+                ["104"] = new("00000000-0000-0000-0000-000000000104", "trace.zip", "application/zip"),
+                ["105"] = new("00000000-0000-0000-0000-000000000105", "demo.mp4", "video/mp4"),
+            });
 }

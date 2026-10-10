@@ -25,19 +25,15 @@ The server speaks MCP over standard input and output, so it waits silently for a
 
 ```shell
 dotnet pack src/Atlassian.Mcp.Server -c Release
-dotnet tool install --global Atlassian.Mcp.Server --add-source ./artifacts --prerelease
+dotnet tool install --global Atlassian.Mcp.Server --version 0.1.0-dev --add-source ./artifacts --allow-downgrade
 ```
 
-To replace an installed copy with a new build, update it:
+The same command replaces an installed copy with a new build.
 
-```shell
-dotnet pack src/Atlassian.Mcp.Server -c Release
-dotnet tool update --global Atlassian.Mcp.Server --add-source ./artifacts --prerelease --allow-downgrade
-```
-
-- **Close every MCP client that runs the server first**, such as Claude Code sessions, VS Code, and Visual Studio. A running server locks `atlassian-mcp-server.exe` and its DLLs, so the update fails with "The process cannot access the file … because it is being used by another process" and rolls back.
+- `--version 0.1.0-dev` is needed because a newer version is published on nuget.org: without it, the command installs that version instead of your build.
 - `--allow-downgrade` is needed when a release, such as `0.1.0`, is installed: a local build is `0.1.0-dev`, and a version with a pre-release suffix counts as older than the release.
-- To try a build without closing the clients, install it into a separate folder instead (`dotnet tool install Atlassian.Mcp.Server --tool-path <folder> --add-source ./artifacts --prerelease`), and point one client's configuration at `<folder>/atlassian-mcp-server`. New sessions of that client use the new build; running ones keep the old.
+- **Close every MCP client that runs the server first**, such as Claude Code sessions, VS Code, and Visual Studio. A running server locks `atlassian-mcp-server.exe` and its DLLs, so the update fails with "The process cannot access the file … because it is being used by another process" and rolls back.
+- To try a build without closing the clients, install it into a separate folder instead (`dotnet tool install Atlassian.Mcp.Server --tool-path <folder> --version 0.1.0-dev --add-source ./artifacts --allow-downgrade`), and point one client's configuration at `<folder>/atlassian-mcp-server`. New sessions of that client use the new build; running ones keep the old.
 
 The [MCP Inspector](https://github.com/modelcontextprotocol/inspector) (`npx @modelcontextprotocol/inspector atlassian-mcp-server`) is useful for calling tools by hand.
 

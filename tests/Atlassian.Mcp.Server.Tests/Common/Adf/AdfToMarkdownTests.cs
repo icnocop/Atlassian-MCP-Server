@@ -164,7 +164,62 @@ public sealed class AdfToMarkdownTests
         string markdown = AdfToMarkdown.Convert(document);
 
         // Assert
-        Assert.AreEqual("@Jane :smile: 2023-11-14 [DONE] [https://example.com/x](https://example.com/x)", markdown);
+        Assert.AreEqual("@[Jane](accountid:abc) :smile: 2023-11-14 [DONE] [https://example.com/x](https://example.com/x)", markdown);
+    }
+
+    /// <summary>
+    /// Verifies that a mention without an account ID, which cannot be written back, is written as plain text.
+    /// </summary>
+    [TestMethod]
+    public void Convert_WithMentionWithoutAccountId_WritesPlainText()
+    {
+        // Arrange
+        JsonNode document = Doc("""{"type":"paragraph","content":[{"type":"mention","attrs":{"text":"@Jane"}}]}""");
+
+        // Act
+        string markdown = AdfToMarkdown.Convert(document);
+
+        // Assert
+        Assert.AreEqual("@Jane", markdown);
+    }
+
+    /// <summary>
+    /// Verifies that a mention without text is written with its account ID as the name, and that a
+    /// closing bracket in the name, which would end it early, is dropped.
+    /// </summary>
+    [TestMethod]
+    public void Convert_WithMentionWithoutTextOrWithBracket_WritesReadableMention()
+    {
+        // Arrange
+        JsonNode document = Doc("""
+            {"type":"paragraph","content":[
+              {"type":"mention","attrs":{"id":"abc"}},
+              {"type":"text","text":" "},
+              {"type":"mention","attrs":{"id":"def","text":"@Jane [Ops]"}}
+            ]}
+            """);
+
+        // Act
+        string markdown = AdfToMarkdown.Convert(document);
+
+        // Assert
+        Assert.AreEqual("@[abc](accountid:abc) @[Jane [Ops](accountid:def)", markdown);
+    }
+
+    /// <summary>
+    /// Verifies that a mention converted to Markdown and back is the same mention.
+    /// </summary>
+    [TestMethod]
+    public void Convert_WithMentionRoundTrip_KeepsTheAccountId()
+    {
+        // Arrange
+        JsonNode document = Doc("""{"type":"paragraph","content":[{"type":"text","text":"Hi "},{"type":"mention","attrs":{"id":"5b10ac8d82e05b22cc7d4ef5","text":"@Jane Doe"}}]}""");
+
+        // Act
+        JsonObject roundTrip = MarkdownToAdf.Convert(AdfToMarkdown.Convert(document));
+
+        // Assert
+        Assert.AreEqual(document.ToJsonString(), roundTrip.ToJsonString());
     }
 
     /// <summary>
@@ -251,6 +306,91 @@ public sealed class AdfToMarkdownTests
 
         // Assert
         Assert.AreEqual(first.ToJsonString(), second.ToJsonString());
+    }
+
+    /// <summary>
+    /// Verifies that media nodes with a known attachment are written as ![name](attachment:ID):
+    /// an image by its alternative text, and the files of a group, by file name, in one paragraph;
+    /// and that a media node without a known attachment stays a placeholder.
+    /// </summary>
+    [TestMethod]
+    public void Convert_WithKnownAttachments_WritesAttachmentReferences()
+    {
+        // Arrange
+        JsonNode document = Doc("""
+            {"type":"mediaSingle","attrs":{"layout":"align-start"},"content":[
+              {"type":"media","attrs":{"type":"file","id":"m-image","alt":"screenshot","collection":""}}]},
+            {"type":"mediaGroup","content":[
+              {"type":"media","attrs":{"type":"file","id":"m-logs","collection":""}},
+              {"type":"media","attrs":{"type":"file","id":"m-trace","collection":""}}]},
+            {"type":"mediaSingle","attrs":{"layout":"center"},"content":[
+              {"type":"media","attrs":{"type":"file","id":"m-unknown","collection":""}}]}
+            """);
+        var attachments = new Dictionary<string, AttachmentReference>
+        {
+            ["m-image"] = new("101", "screenshot.png"),
+            ["m-logs"] = new("103", "logs.zip"),
+            ["m-trace"] = new("104", "trace [old].zip"),
+        };
+
+        // Act
+        string markdown = AdfToMarkdown.Convert(document, attachments);
+
+        // Assert
+        Assert.AreEqual(
+            "![screenshot](attachment:101)\n\n![logs.zip](attachment:103)\n![trace [old.zip](attachment:104)\n\n<!-- adf:media id=m-unknown type=file -->",
+            markdown);
+    }
+
+    /// <summary>
+    /// Verifies that embedded attachments written as Markdown convert back into the same media blocks.
+    /// </summary>
+    [TestMethod]
+    public void Convert_WithAttachmentRoundTrip_ProducesIdenticalAdf()
+    {
+        // Arrange
+        var embedded = new AdfReferences(
+            new Dictionary<string, string>(),
+            new Dictionary<string, EmbeddedAttachment>
+            {
+                ["101"] = new("m-image", "screenshot.png", "image/png"),
+                ["103"] = new("m-logs", "logs.zip", "application/zip"),
+                ["104"] = new("m-trace", "trace.zip", "application/zip"),
+            });
+        var read = new Dictionary<string, AttachmentReference>
+        {
+            ["m-image"] = new("101", "screenshot.png"),
+            ["m-logs"] = new("103", "logs.zip"),
+            ["m-trace"] = new("104", "trace.zip"),
+        };
+        JsonObject first = MarkdownToAdf.Convert("Before\n\n![screenshot](attachment:101)\n\n![logs.zip](attachment:103)\n![trace.zip](attachment:104)\n\nAfter", embedded);
+
+        // Act
+        JsonObject second = MarkdownToAdf.Convert(AdfToMarkdown.Convert(first, read), embedded);
+
+        // Assert
+        Assert.AreEqual(first.ToJsonString(), second.ToJsonString());
+    }
+
+    /// <summary>
+    /// Verifies that converting the documents of a response with known attachments leaves the
+    /// response itself without the annotations used to write them.
+    /// </summary>
+    [TestMethod]
+    public void ConvertDocuments_WithKnownAttachments_DoesNotChangeTheResponse()
+    {
+        // Arrange
+        JsonNode response = JsonNode.Parse("""
+            {"body":{"type":"doc","version":1,"content":[{"type":"mediaGroup","content":[{"type":"media","attrs":{"type":"file","id":"m-logs","collection":""}}]}]}}
+            """)!;
+        string before = response.ToJsonString();
+
+        // Act
+        JsonNode converted = AdfToMarkdown.ConvertDocuments(response, new Dictionary<string, AttachmentReference> { ["m-logs"] = new("103", "logs.zip") })!;
+
+        // Assert
+        Assert.AreEqual("![logs.zip](attachment:103)", converted["body"]!.GetValue<string>());
+        Assert.AreEqual(before, response.ToJsonString());
     }
 
     private static JsonNode Doc(string blocks)

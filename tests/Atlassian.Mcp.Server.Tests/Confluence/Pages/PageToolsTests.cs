@@ -35,6 +35,67 @@ public sealed class PageToolsTests
     }
 
     /// <summary>
+    /// Verifies that embedding an attachment, which is supported for Jira only, is refused before anything is sent.
+    /// </summary>
+    /// <returns>A task.</returns>
+    [TestMethod]
+    public async Task Create_WithEmbeddedAttachment_ThrowsAndSendsNothing()
+    {
+        // Act
+        McpException exception = await Assert.ThrowsExactlyAsync<McpException>(
+            () => this.tools.Create("T", "![logs.zip](attachment:101)", spaceKey: "9", publish: true));
+
+        // Assert
+        StringAssert.Contains(exception.Message, "supported in Jira only", StringComparison.Ordinal);
+        Assert.HasCount(0, this.http.Requests);
+    }
+
+    /// <summary>
+    /// Verifies that a mention by name in a Markdown body is resolved with a Confluence user search
+    /// and sent as a mention node.
+    /// </summary>
+    /// <returns>A task.</returns>
+    [TestMethod]
+    public async Task Create_WithMentionByName_SearchesAndSendsMentionNode()
+    {
+        // Arrange
+        this.http
+            .Respond("""{"results":[{"user":{"accountId":"5b10ac8d","displayName":"Jane \"JD\" Doe","accountType":"atlassian"}}]}""")
+            .Respond("""{"id":"1","title":"T","status":"current"}""");
+
+        // Act
+        await this.tools.Create("T", "Owner: @[Jane \"JD\" Doe]", spaceKey: "9", publish: true);
+
+        // Assert
+        Assert.AreEqual(
+            "wiki/rest/api/search/user?cql=user.fullname~%22Jane%20%5C%22JD%5C%22%20Doe%22&limit=50",
+            this.http.Requests[0].Path);
+        JsonNode adf = JsonNode.Parse(this.http.LastRequest.Body!["body"]!["value"]!.GetValue<string>())!;
+        JsonNode mention = adf["content"]![0]!["content"]![1]!;
+        Assert.AreEqual("mention", mention["type"]!.GetValue<string>());
+        Assert.AreEqual("5b10ac8d", mention["attrs"]!["id"]!.GetValue<string>());
+    }
+
+    /// <summary>
+    /// Verifies that a section of a page that has a mention can be replaced, because a mention is not lossy.
+    /// </summary>
+    /// <returns>A task.</returns>
+    [TestMethod]
+    public async Task UpdateSection_WithMentionInSection_ReplacesIt()
+    {
+        // Arrange
+        string page = PageJson("current", 4, "## Owner\n\n@[Jane](accountid:a)\n\n## Notes\n\n@[Eve](accountid:e)");
+        this.http.Respond(page).Respond(page).Respond(PageJson("draft", 1, "x"));
+
+        // Act
+        await this.tools.UpdateSection("1", "Owner", "@[Bob](accountid:b)");
+
+        // Assert
+        JsonNode document = JsonNode.Parse(this.http.LastRequest.Body!["body"]!["value"]!.GetValue<string>())!;
+        Assert.AreEqual("## Owner\n\n@[Bob](accountid:b)\n\n## Notes\n\n@[Eve](accountid:e)", AdfToMarkdown.Convert(document));
+    }
+
+    /// <summary>
     /// Verifies that a new page is a private draft by default.
     /// </summary>
     /// <returns>A task.</returns>

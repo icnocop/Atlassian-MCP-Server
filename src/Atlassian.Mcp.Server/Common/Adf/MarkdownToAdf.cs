@@ -6,6 +6,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using Atlassian.Mcp.Server.Common.Json;
+using ModelContextProtocol;
 
 namespace Atlassian.Mcp.Server.Common.Adf;
 
@@ -16,12 +17,30 @@ namespace Atlassian.Mcp.Server.Common.Adf;
 /// <para>
 /// Supports a pragmatic subset of Markdown: headings, paragraphs, fenced code blocks, tables,
 /// block quotes, thematic breaks, bulleted and numbered lists (nested by indentation), and inline
-/// code, bold, italic, strikethrough, and links. Inline marks nest, so bold around inline code
-/// yields one text node carrying both marks.
+/// code, bold, italic, strikethrough, links, and user mentions. Inline marks nest, so bold around
+/// inline code yields one text node carrying both marks.
+/// </para>
+/// <para>
+/// A mention is written <c>@[Display Name](accountid:ID)</c>, or <c>@[Display Name]</c> when the
+/// caller resolves the name to an account ID first (see <see cref="FindMentionNames"/> and
+/// <see cref="MentionResolver"/>). A bare <c>@name</c> stays plain text, because Markdown cannot say
+/// where a name of several words ends.
+/// </para>
+/// <para>
+/// A Jira attachment is embedded with <c>![name](attachment:ID)</c>, in a paragraph of its own (see
+/// <see cref="FindAttachmentIds"/>). An image or a video is shown inline, in a <c>mediaSingle</c>
+/// node; any other file is shown as a file card, and consecutive files share one
+/// <c>mediaGroup</c>, as Jira's own editor writes them.
 /// </para>
 /// </summary>
 public static partial class MarkdownToAdf
 {
+    /// <summary>
+    /// The type of the block that stands for embedded attachments until <see cref="Convert(string?, AdfReferences?)"/>
+    /// replaces it. It never reaches Atlassian.
+    /// </summary>
+    private const string PendingMediaType = "pendingMedia";
+
     private static readonly Mark StrongMark = new("strong", new { type = "strong" });
     private static readonly Mark EmMark = new("em", new { type = "em" });
     private static readonly Mark StrikeMark = new("strike", new { type = "strike" });
@@ -32,10 +51,72 @@ public static partial class MarkdownToAdf
     /// </summary>
     /// <param name="markdown">The Markdown text. <see langword="null"/> is treated as empty.</param>
     /// <returns>The ADF document.</returns>
-    public static JsonObject Convert(string? markdown)
-        => (JsonObject)JsonSerializer.SerializeToNode(
-            new { type = "doc", version = 1, content = ParseDocument(markdown ?? string.Empty) },
-            JsonDefaults.Options)!;
+    /// <exception cref="InvalidOperationException">The text holds a mention without an account ID, or an embedded attachment.</exception>
+    /// <exception cref="McpException">The text embeds an attachment somewhere other than a paragraph of its own.</exception>
+    public static JsonObject Convert(string? markdown) => Convert(markdown, references: null);
+
+    /// <summary>
+    /// Converts Markdown text into an ADF document, taking the account IDs of mentions written
+    /// without one (<c>@[Display Name]</c>) and the media of embedded attachments
+    /// (<c>![name](attachment:ID)</c>) from <paramref name="references"/>.
+    /// </summary>
+    /// <param name="markdown">The Markdown text. <see langword="null"/> is treated as empty.</param>
+    /// <param name="references">The resolved references, or <see langword="null"/>.</param>
+    /// <returns>The ADF document.</returns>
+    /// <exception cref="InvalidOperationException">
+    /// The text holds a mention or an attachment that <paramref name="references"/> does not
+    /// resolve. Callers resolve everything that <see cref="FindMentionNames"/> and
+    /// <see cref="FindAttachmentIds"/> return first, so this is a programming error rather than a
+    /// user error.
+    /// </exception>
+    /// <exception cref="McpException">The text embeds an attachment somewhere other than a paragraph of its own.</exception>
+    public static JsonObject Convert(string? markdown, AdfReferences? references)
+    {
+        JsonObject document = Parse(markdown);
+        foreach (JsonObject mention in UnresolvedMentions(document).ToList())
+        {
+            string name = MentionName(mention);
+            if (references is null || !references.MentionAccountIds.TryGetValue(name, out string? accountId))
+            {
+                throw new InvalidOperationException($"The mention @[{name}] has not been resolved to an account ID.");
+            }
+
+            mention["attrs"]!["id"] = accountId;
+        }
+
+        if (PendingMedia(document).Any())
+        {
+            document["content"] = ResolveMedia(document["content"]!.AsArray(), references?.Attachments);
+        }
+
+        return document;
+    }
+
+    /// <summary>
+    /// Finds the names of the mentions written without an account ID (<c>@[Display Name]</c>), which
+    /// must be resolved before <see cref="Convert(string?, AdfReferences?)"/>.
+    /// Mentions inside code spans and code blocks are literal text, so they are not returned.
+    /// </summary>
+    /// <param name="markdown">The Markdown text. <see langword="null"/> is treated as empty.</param>
+    /// <returns>The distinct names, in order of first appearance.</returns>
+    /// <exception cref="McpException">The text embeds an attachment somewhere other than a paragraph of its own.</exception>
+    public static IReadOnlyList<string> FindMentionNames(string? markdown)
+        => UnresolvedMentions(Parse(markdown)).Select(MentionName).Distinct(StringComparer.Ordinal).ToList();
+
+    /// <summary>
+    /// Finds the IDs of the attachments embedded with <c>![name](attachment:ID)</c>, whose media
+    /// must be resolved before <see cref="Convert(string?, AdfReferences?)"/>. References inside code
+    /// spans and code blocks are literal text, so they are not returned.
+    /// </summary>
+    /// <param name="markdown">The Markdown text. <see langword="null"/> is treated as empty.</param>
+    /// <returns>The distinct attachment IDs, in order of first appearance.</returns>
+    /// <exception cref="McpException">The text embeds an attachment somewhere other than a paragraph of its own.</exception>
+    public static IReadOnlyList<string> FindAttachmentIds(string? markdown)
+        => PendingMedia(Parse(markdown))
+            .SelectMany(block => block["content"]!.AsArray())
+            .Select(item => item!["attachmentId"]!.GetValue<string>())
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
 
     /// <summary>
     /// Converts the Markdown string values of rich-text fields in a field map into ADF documents,
@@ -51,6 +132,17 @@ public static partial class MarkdownToAdf
     /// <param name="fields">The field map, keyed by field ID. It is changed in place.</param>
     /// <param name="isRichTextField">Returns <see langword="true"/> for the ID of a field that holds ADF.</param>
     public static void ConvertRichTextFields(JsonObject fields, Func<string, bool> isRichTextField)
+        => ConvertRichTextFields(fields, isRichTextField, references: null);
+
+    /// <summary>
+    /// Converts the Markdown string values of rich-text fields in a field map into ADF documents,
+    /// as <see cref="ConvertRichTextFields(JsonObject, Func{string, bool})"/> does, taking mentions
+    /// and embedded attachments from <paramref name="references"/>.
+    /// </summary>
+    /// <param name="fields">The field map, keyed by field ID. It is changed in place.</param>
+    /// <param name="isRichTextField">Returns <see langword="true"/> for the ID of a field that holds ADF.</param>
+    /// <param name="references">The resolved references, or <see langword="null"/>.</param>
+    public static void ConvertRichTextFields(JsonObject fields, Func<string, bool> isRichTextField, AdfReferences? references)
     {
         ArgumentNullException.ThrowIfNull(fields);
         ArgumentNullException.ThrowIfNull(isRichTextField);
@@ -61,7 +153,7 @@ public static partial class MarkdownToAdf
                 && value.TryGetValue(out string? text)
                 && isRichTextField(id))
             {
-                fields[id] = Convert(text);
+                fields[id] = Convert(text, references);
             }
         }
     }
@@ -102,14 +194,220 @@ public static partial class MarkdownToAdf
     private static partial Regex CellSeparatorPattern();
 
     /// <summary>
-    /// Inline tokens, in precedence order: code span, bold, strikethrough, italic (* or _), and link.
-    /// The two italic branches share the group name "em".
+    /// Inline tokens, in precedence order: code span, bold, strikethrough, italic (* or _), embedded
+    /// attachment, mention, and link. The two italic branches share the group name "em". An embedded
+    /// attachment is <c>![name](attachment:ID)</c>. A mention is <c>@[name]</c>, optionally followed
+    /// by <c>(accountid:ID)</c>; the @ must not follow a word character, so text such as
+    /// <c>user@[host]</c> stays literal.
     /// </summary>
     /// <returns>The pattern.</returns>
-    [GeneratedRegex(@"`(?<code>[^`]+)`|\*\*(?<strong>.+?)\*\*|~~(?<strike>.+?)~~|\*(?<em>[^*]+)\*|(?<!\w)_(?<em>.+?)_(?!\w)|\[(?<linkText>[^\]]+)\]\((?<href>[^)]+)\)")]
+    [GeneratedRegex(@"`(?<code>[^`]+)`|\*\*(?<strong>.+?)\*\*|~~(?<strike>.+?)~~|\*(?<em>[^*]+)\*|(?<!\w)_(?<em>.+?)_(?!\w)|!\[(?<mediaName>[^\]]*)\]\(attachment:(?<attachmentId>\d+)\)|(?<!\w)@\[(?<mention>[^\]]+)\](?:\(accountid:(?<accountId>[^)\s]+)\))?|\[(?<linkText>[^\]]+)\]\((?<href>[^)]+)\)", RegexOptions.IgnoreCase)]
     private static partial Regex InlinePattern();
 
     private static Mark LinkMark(string href) => new("link", new { type = "link", attrs = new { href } });
+
+    /// <summary>
+    /// Parses Markdown into an ADF document whose mentions written without an account ID have none
+    /// yet, and whose embedded attachments are <see cref="PendingMediaType"/> blocks.
+    /// </summary>
+    private static JsonObject Parse(string? markdown)
+        => (JsonObject)JsonSerializer.SerializeToNode(
+            new { type = "doc", version = 1, content = ParseDocument(markdown ?? string.Empty) },
+            JsonDefaults.Options)!;
+
+    /// <summary>Finds the <see cref="PendingMediaType"/> blocks, which only appear at the top level.</summary>
+    private static IEnumerable<JsonObject> PendingMedia(JsonObject document)
+        => (document["content"] as JsonArray ?? [])
+            .OfType<JsonObject>()
+            .Where(block => block["type"]?.GetValue<string>() == PendingMediaType);
+
+    /// <summary>
+    /// Replaces each <see cref="PendingMediaType"/> block with the media blocks Jira's editor writes:
+    /// a <c>mediaSingle</c> for each image or video, and one <c>mediaGroup</c> for each run of
+    /// other files.
+    /// </summary>
+    private static JsonArray ResolveMedia(JsonArray blocks, IReadOnlyDictionary<string, EmbeddedAttachment>? attachments)
+    {
+        var resolved = new JsonArray();
+        foreach (JsonNode? block in blocks)
+        {
+            if (block?["type"]?.GetValue<string>() != PendingMediaType)
+            {
+                resolved.Add(block?.DeepClone());
+                continue;
+            }
+
+            JsonArray? files = null;
+            foreach (JsonNode? item in block["content"]!.AsArray())
+            {
+                string attachmentId = item!["attachmentId"]!.GetValue<string>();
+                string name = item["name"]!.GetValue<string>();
+                if (attachments is null || !attachments.TryGetValue(attachmentId, out EmbeddedAttachment? attachment))
+                {
+                    throw new InvalidOperationException($"The attachment {attachmentId} has not been resolved to its media.");
+                }
+
+                var media = new JsonObject
+                {
+                    ["type"] = "media",
+                    ["attrs"] = new JsonObject { ["type"] = "file", ["id"] = attachment.MediaId, ["collection"] = string.Empty },
+                };
+
+                if (!attachment.IsImageOrVideo)
+                {
+                    if (files is null)
+                    {
+                        files = [];
+                        resolved.Add(new JsonObject { ["type"] = "mediaGroup", ["content"] = files });
+                    }
+
+                    files.Add(media);
+                    continue;
+                }
+
+                files = null;
+                media["attrs"]!["alt"] = name.Length > 0 ? name : attachment.FileName;
+                resolved.Add(new JsonObject
+                {
+                    ["type"] = "mediaSingle",
+                    ["attrs"] = new JsonObject { ["layout"] = "align-start" },
+                    ["content"] = new JsonArray(media),
+                });
+            }
+        }
+
+        return resolved;
+    }
+
+    /// <summary>
+    /// Splits the inline content of a top-level paragraph at its embedded attachments: the text
+    /// around them stays in paragraphs, and each run of attachments, separated only by white space
+    /// or line breaks, becomes one <see cref="PendingMediaType"/> block. A paragraph without
+    /// attachments is returned unchanged.
+    /// </summary>
+    private static IEnumerable<object> SplitMedia(List<object> content)
+    {
+        if (!content.OfType<MediaReference>().Any())
+        {
+            yield return new { type = "paragraph", content };
+            yield break;
+        }
+
+        var text = new List<object>();
+        var media = new List<MediaReference>();
+        foreach (object node in content)
+        {
+            if (node is MediaReference reference)
+            {
+                if (ParagraphOf(text) is { } paragraph)
+                {
+                    yield return paragraph;
+                }
+
+                text = [];
+                media.Add(reference);
+                continue;
+            }
+
+            if (media.Count > 0 && IsBlank(node))
+            {
+                continue;
+            }
+
+            if (media.Count > 0)
+            {
+                yield return PendingMediaBlock(media);
+                media = [];
+            }
+
+            text.Add(node);
+        }
+
+        if (media.Count > 0)
+        {
+            yield return PendingMediaBlock(media);
+        }
+
+        if (ParagraphOf(text) is { } last)
+        {
+            yield return last;
+        }
+    }
+
+    /// <summary>
+    /// Returns a paragraph of <paramref name="text"/> without the line breaks and white space at its
+    /// ends, which were only there to separate it from an attachment; or <see langword="null"/> when
+    /// nothing else is left.
+    /// </summary>
+    private static object? ParagraphOf(List<object> text)
+    {
+        List<object> content = text.SkipWhile(IsBlank).Reverse().SkipWhile(IsBlank).Reverse().ToList();
+        return content.Count == 0 ? null : new { type = "paragraph", content };
+    }
+
+    private static object PendingMediaBlock(List<MediaReference> media)
+        => new { type = PendingMediaType, content = media.Select(item => new { attachmentId = item.AttachmentId, name = item.Name }).ToList() };
+
+    /// <summary>Returns <see langword="true"/> for a line break, or for text that is only white space.</summary>
+    private static bool IsBlank(object node)
+    {
+        JsonNode? json = JsonSerializer.SerializeToNode(node, JsonDefaults.Options);
+        string? type = json?["type"]?.GetValue<string>();
+        return type == "hardBreak" || (type == "text" && string.IsNullOrWhiteSpace(json?["text"]?.GetValue<string>()));
+    }
+
+    /// <summary>
+    /// Refuses inline content that embeds an attachment, for the places where ADF cannot hold a
+    /// media block: headings, list items, table cells, and block quotes.
+    /// </summary>
+    private static List<object> WithoutMedia(List<object> content, string place)
+    {
+        MediaReference? reference = content.OfType<MediaReference>().FirstOrDefault();
+        if (reference is not null)
+        {
+            throw new McpException(
+                $"The attachment in ![{reference.Name}](attachment:{reference.AttachmentId}) is inside {place}. Put each embedded attachment in a paragraph of its own.");
+        }
+
+        return content;
+    }
+
+    /// <summary>Finds the mention nodes in <paramref name="node"/> that have no account ID.</summary>
+    private static IEnumerable<JsonObject> UnresolvedMentions(JsonNode? node)
+    {
+        switch (node)
+        {
+            case JsonObject item:
+                if (item["type"] is JsonValue type
+                    && type.TryGetValue(out string? name)
+                    && name == "mention"
+                    && item["attrs"]?["id"] is null)
+                {
+                    yield return item;
+                }
+
+                foreach (JsonObject mention in UnresolvedMentions(item["content"]))
+                {
+                    yield return mention;
+                }
+
+                break;
+
+            case JsonArray items:
+                foreach (JsonNode? child in items)
+                {
+                    foreach (JsonObject mention in UnresolvedMentions(child))
+                    {
+                        yield return mention;
+                    }
+                }
+
+                break;
+        }
+    }
+
+    /// <summary>Returns the name of a mention node: its text without the leading @.</summary>
+    private static string MentionName(JsonObject mention) => mention["attrs"]!["text"]!.GetValue<string>()[1..];
 
     private static List<object> ParseDocument(string markdown)
     {
@@ -169,12 +467,12 @@ public static partial class MarkdownToAdf
             {
                 string text = heading.Groups[2].Value.Trim();
                 blocks.Add(inQuote
-                    ? (object)new { type = "paragraph", content = ParseInline(text, [StrongMark]) }
+                    ? (object)new { type = "paragraph", content = WithoutMedia(ParseInline(text, [StrongMark]), "a block quote") }
                     : new
                     {
                         type = "heading",
                         attrs = new { level = heading.Groups[1].Value.Length },
-                        content = ParseInline(text),
+                        content = WithoutMedia(ParseInline(text), "a heading"),
                     });
                 i++;
                 continue;
@@ -243,7 +541,15 @@ public static partial class MarkdownToAdf
                 i++;
             }
 
-            blocks.Add(new { type = "paragraph", content = BuildParagraphContent(paragraph) });
+            List<object> paragraphContent = BuildParagraphContent(paragraph);
+            if (inQuote)
+            {
+                blocks.Add(new { type = "paragraph", content = WithoutMedia(paragraphContent, "a block quote") });
+            }
+            else
+            {
+                blocks.AddRange(SplitMedia(paragraphContent));
+            }
         }
 
         return blocks;
@@ -355,7 +661,7 @@ public static partial class MarkdownToAdf
             {
                 type = header ? "tableHeader" : "tableCell",
                 attrs = new { },
-                content = new List<object> { new { type = "paragraph", content = ParseInline(cell) } },
+                content = new List<object> { new { type = "paragraph", content = WithoutMedia(ParseInline(cell), "a table cell") } },
             }).ToList(),
         };
 
@@ -429,7 +735,7 @@ public static partial class MarkdownToAdf
 
             var itemContent = new List<object>
             {
-                new { type = "paragraph", content = ParseInline(current.Text) },
+                new { type = "paragraph", content = WithoutMedia(ParseInline(current.Text), "a list item") },
             };
 
             // A deeper indent after this item is a nested list that belongs to it.
@@ -485,6 +791,18 @@ public static partial class MarkdownToAdf
             {
                 nodes.AddRange(ParseInline(match.Groups["em"].Value, WithMark(marks, EmMark)));
             }
+            else if (match.Groups["attachmentId"].Success)
+            {
+                // A stand-in that the paragraph splits out into a media block; see SplitMedia.
+                nodes.Add(new MediaReference(match.Groups["attachmentId"].Value, match.Groups["mediaName"].Value.Trim()));
+            }
+            else if (match.Groups["mention"].Success)
+            {
+                // A mention is an inline node, not text, so it carries no marks. Without an
+                // explicit account ID the node has none until Convert fills it in.
+                string? accountId = match.Groups["accountId"].Success ? match.Groups["accountId"].Value : null;
+                nodes.Add(new { type = "mention", attrs = new { id = accountId, text = "@" + match.Groups["mention"].Value.Trim() } });
+            }
             else if (match.Groups["linkText"].Success)
             {
                 nodes.AddRange(ParseInline(match.Groups["linkText"].Value, WithMark(marks, LinkMark(match.Groups["href"].Value))));
@@ -524,6 +842,11 @@ public static partial class MarkdownToAdf
     /// <param name="Type">The mark type.</param>
     /// <param name="Adf">The ADF mark object.</param>
     private sealed record Mark(string Type, object Adf);
+
+    /// <summary>An embedded attachment, written <c>![name](attachment:ID)</c>, before it is split out of its paragraph.</summary>
+    /// <param name="AttachmentId">The attachment ID.</param>
+    /// <param name="Name">The name written between the brackets, which may be empty.</param>
+    private sealed record MediaReference(string AttachmentId, string Name);
 
     /// <summary>One line of a Markdown list.</summary>
     /// <param name="Indent">The number of leading spaces.</param>

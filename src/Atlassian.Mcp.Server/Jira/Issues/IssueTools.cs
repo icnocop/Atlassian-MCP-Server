@@ -45,7 +45,7 @@ public sealed class IssueTools
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The issue.</returns>
     [McpServerTool(Name = "atlassian_jira_get_issue", ReadOnly = true, Idempotent = true, OpenWorld = true)]
-    [Description("Gets the specified Jira issue with its fields, including custom fields (customfield_*) that have a value. Rich text such as the description, environment, comments, and multi-line custom fields is returned as Markdown by default.")]
+    [Description("Gets the specified Jira issue with its fields, including custom fields (customfield_*) that have a value. Rich text such as the description, environment, comments, and multi-line custom fields is returned as Markdown by default, with embedded files written as `![name](attachment:ID)`.")]
     public async Task<string> Get(
         [Description("The issue key, such as PROJ-123, or the issue ID.")] string issueKey,
         [Description("Optional comma-separated fields to return, such as summary,status,customfield_10010. Defaults to all fields.")] string? fields = null,
@@ -53,13 +53,18 @@ public sealed class IssueTools
         [Description("The format for rich text: markdown (default) or adf.")] string richTextFormat = "markdown",
         CancellationToken cancellationToken = default)
     {
-        string path = new QueryString($"issue/{JiraClient.Segment(issueKey)}")
+        string Path(bool rendered) => new QueryString($"issue/{JiraClient.Segment(issueKey)}")
             .Add("fields", fields)
-            .Add("expand", expand)
+            .Add("expand", rendered ? JiraRichText.WithExpand(expand, "renderedFields") : expand)
             .ToString();
 
-        JsonNode? issue = await this.jira.GetAsync(path, cancellationToken);
-        return ToolResult.Json(FormatRichText(issue, richTextFormat));
+        bool renderedRequested = JiraRichText.Expands(expand, "renderedFields");
+        if (!JiraRichText.IsMarkdown(richTextFormat))
+        {
+            return ToolResult.Json(await this.jira.GetAsync(Path(renderedRequested), cancellationToken));
+        }
+
+        return ToolResult.Json(await JiraRichText.GetAsMarkdownAsync(this.jira, Path, renderedRequested, "renderedFields", cancellationToken));
     }
 
     /// <summary>
@@ -81,7 +86,7 @@ public sealed class IssueTools
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The key, ID, and URL of the new issue.</returns>
     [McpServerTool(Name = "atlassian_jira_create_issue", OpenWorld = true)]
-    [Description("Creates a Jira issue. Call atlassian_jira_get_create_meta first to learn the project's required fields, custom fields, and allowed values. Text fields take Markdown.")]
+    [Description("Creates a Jira issue. Call atlassian_jira_get_create_meta first to learn the project's required fields, custom fields, and allowed values. Text fields take Markdown. Mention a user, notifying them, with `@[Display Name]`, or with `@[Display Name](accountid:ID)` when the account ID is known; a bare @name stays plain text. Embed a file already attached to the issue, shown inline for an image or video and as a file card otherwise, with `![name](attachment:ID)` in a paragraph of its own.")]
     public async Task<string> Create(
         [Description("The project key, such as PROJ, or the project ID.")] string projectKey,
         [Description("The issue type name, such as Bug, Task, Story, Epic, or Subtask, or its ID.")] string issueType,
@@ -105,7 +110,8 @@ public sealed class IssueTools
             ["summary"] = summary,
         };
 
-        SetCommonFields(fieldValues, description, environment, assigneeAccountId, priority, labels, dueDate, parentKey);
+        AdfReferences references = await this.jira.ResolveReferencesAsync([description, environment], cancellationToken);
+        SetCommonFields(fieldValues, description, environment, assigneeAccountId, priority, labels, dueDate, parentKey, references);
 
         List<string> componentNames = JsonArguments.SplitList(components);
         if (componentNames.Count > 0)
@@ -150,7 +156,7 @@ public sealed class IssueTools
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>A confirmation.</returns>
     [McpServerTool(Name = "atlassian_jira_update_issue", Idempotent = true, OpenWorld = true)]
-    [Description("Updates the specified Jira issue. Only the fields that are passed change. Text fields take Markdown.")]
+    [Description("Updates the specified Jira issue. Only the fields that are passed change. Text fields take Markdown. Mention a user, notifying them, with `@[Display Name]`, or with `@[Display Name](accountid:ID)` when the account ID is known; a bare @name stays plain text. Embed a file already attached to the issue, shown inline for an image or video and as a file card otherwise, with `![name](attachment:ID)` in a paragraph of its own.")]
     public async Task<string> Update(
         [Description("The issue key, such as PROJ-123, or the issue ID.")] string issueKey,
         [Description("Optional new summary, as plain text.")] string? summary = null,
@@ -173,7 +179,8 @@ public sealed class IssueTools
             fieldValues["summary"] = summary;
         }
 
-        SetCommonFields(fieldValues, description, environment, assigneeAccountId, priority, labels, dueDate, parentKey);
+        AdfReferences references = await this.jira.ResolveReferencesAsync([description, environment], cancellationToken);
+        SetCommonFields(fieldValues, description, environment, assigneeAccountId, priority, labels, dueDate, parentKey, references);
 
         if (originalEstimate is not null || remainingEstimate is not null)
         {
@@ -347,12 +354,7 @@ public sealed class IssueTools
     /// <returns>The converted response.</returns>
     /// <exception cref="McpException">The format is not known.</exception>
     internal static JsonNode? FormatRichText(JsonNode? response, string richTextFormat)
-        => (richTextFormat ?? "markdown").Trim().ToUpperInvariant() switch
-        {
-            "MARKDOWN" or "" => AdfToMarkdown.ConvertDocuments(response),
-            "ADF" => response,
-            _ => throw new McpException("The richTextFormat parameter must be markdown or adf."),
-        };
+        => JiraRichText.IsMarkdown(richTextFormat) ? AdfToMarkdown.ConvertDocuments(response) : response;
 
     private static JsonObject IdOrKey(string value, string nonNumericProperty)
     {
@@ -370,16 +372,17 @@ public sealed class IssueTools
         string? priority,
         string? labels,
         string? dueDate,
-        string? parentKey)
+        string? parentKey,
+        AdfReferences references)
     {
         if (description is not null)
         {
-            fieldValues["description"] = JiraClient.ToAdf(description);
+            fieldValues["description"] = JiraClient.ToAdf(description, references);
         }
 
         if (environment is not null)
         {
-            fieldValues["environment"] = JiraClient.ToAdf(environment);
+            fieldValues["environment"] = JiraClient.ToAdf(environment, references);
         }
 
         if (!string.IsNullOrWhiteSpace(assigneeAccountId))
@@ -433,7 +436,11 @@ public sealed class IssueTools
         if (extra.Any(pair => pair.Value is JsonValue value && value.TryGetValue(out string? _)))
         {
             IReadOnlySet<string> richText = await this.metadata.GetRichTextFieldIdsAsync(this.jira, cancellationToken);
-            MarkdownToAdf.ConvertRichTextFields(extra, richText.Contains);
+            IEnumerable<string?> markdownTexts = extra
+                .Where(pair => richText.Contains(pair.Key) && pair.Value is JsonValue value && value.TryGetValue(out string? _))
+                .Select(pair => pair.Value!.GetValue<string>());
+            AdfReferences references = await this.jira.ResolveReferencesAsync(markdownTexts, cancellationToken);
+            MarkdownToAdf.ConvertRichTextFields(extra, richText.Contains, references);
         }
 
         foreach (string name in extra.Select(pair => pair.Key).ToList())

@@ -81,14 +81,14 @@ public sealed class CommentTools
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The new comment.</returns>
     [McpServerTool(Name = "atlassian_confluence_add_comment", OpenWorld = true)]
-    [Description("Adds a footer comment to the specified Confluence page, or a reply to one of its comments. The comment is published immediately.")]
+    [Description("Adds a footer comment to the specified Confluence page, or a reply to one of its comments. The comment is published immediately. Mention a user, notifying them, with `@[Display Name]`, or with `@[Display Name](accountid:ID)` when the account ID is known; a bare @name stays plain text.")]
     public async Task<string> Add(
         [Description("The page ID. Ignored when parentCommentId is given.")] string pageId,
         [Description("The comment, in Markdown.")] string body,
         [Description("Optional ID of the comment to reply to.")] string? parentCommentId = null,
         CancellationToken cancellationToken = default)
     {
-        var request = new JsonObject { ["body"] = ConfluenceContent.ToRequestBody(body, "markdown") };
+        var request = new JsonObject { ["body"] = await ConfluenceContent.ToRequestBodyAsync(this.confluence, body, "markdown", cancellationToken) };
         if (string.IsNullOrWhiteSpace(parentCommentId))
         {
             request["pageId"] = pageId.Trim();
