@@ -84,6 +84,15 @@ internal sealed class RecordingHttpClient : AtlassianHttpClient
         return Task.FromResult<(byte[], string?)>((bytes, mediaType));
     }
 
+    /// <inheritdoc/>
+    /// <remarks>The queued response is <c>{"location": "https://..."}</c>, or <see langword="null"/> for no redirect.</remarks>
+    public override Task<Uri?> GetRedirectTargetAsync(string path, CancellationToken cancellationToken)
+    {
+        JsonNode? response = this.Answer(new RecordedRequest(HttpMethod.Get, path, Body: null, FileName: null, Content: null, FormFields: null));
+        string? location = response?["location"]?.GetValue<string>();
+        return Task.FromResult(location is null ? null : new Uri(location));
+    }
+
     private JsonNode? Answer(RecordedRequest request)
     {
         this.Requests.Add(request);

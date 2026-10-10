@@ -5,6 +5,7 @@
 using System.ComponentModel;
 using System.Text.Json.Nodes;
 using Atlassian.Mcp.Server.Common;
+using Atlassian.Mcp.Server.Common.Adf;
 using Atlassian.Mcp.Server.Common.Http;
 using Atlassian.Mcp.Server.Configuration;
 using ModelContextProtocol;
@@ -38,26 +39,28 @@ public sealed class CommentTools
     /// <param name="maxResults">The largest number of comments to return.</param>
     /// <param name="orderBy">The sort order.</param>
     /// <param name="includeRenderedBody">A value indicating whether to include the HTML rendering of each body.</param>
+    /// <param name="richTextFormat">The format for the bodies.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>A page of comments.</returns>
     [McpServerTool(Name = "atlassian_jira_get_comments", ReadOnly = true, Idempotent = true, OpenWorld = true)]
-    [Description("Gets the comments for the specified Jira issue, one page at a time. Bodies are returned as Atlassian Document Format (ADF).")]
+    [Description("Gets the comments for the specified Jira issue, one page at a time. Bodies are returned as Markdown by default, with embedded files written as `![name](attachment:ID)`.")]
     public async Task<string> GetAll(
         [Description("The issue key, such as PROJ-123, or the issue ID.")] string issueKey,
         [Description("The zero-based index of the first comment to return. Defaults to 0.")] int? startAt = null,
         [Description("The largest number of comments to return. Defaults to 50.")] int? maxResults = null,
         [Description("The sort order: \"created\" for oldest first, or \"-created\" for newest first.")] string? orderBy = null,
         [Description("When true, each comment also includes its body rendered as HTML.")] bool? includeRenderedBody = null,
+        [Description("The format for the bodies: markdown (default) or adf.")] string richTextFormat = "markdown",
         CancellationToken cancellationToken = default)
     {
-        string path = new QueryString($"issue/{JiraClient.Segment(issueKey)}/comment")
+        string Path(bool rendered) => new QueryString($"issue/{JiraClient.Segment(issueKey)}/comment")
             .Add("startAt", startAt)
             .Add("maxResults", maxResults)
             .Add("orderBy", orderBy)
-            .Add("expand", includeRenderedBody == true ? "renderedBody" : null)
+            .Add("expand", rendered ? "renderedBody" : null)
             .ToString();
 
-        return ToolResult.Json(await this.jira.GetAsync(path, cancellationToken));
+        return await this.GetCommentsAsync(Path, includeRenderedBody == true, richTextFormat, cancellationToken);
     }
 
     /// <summary>
@@ -66,21 +69,23 @@ public sealed class CommentTools
     /// <param name="issueKey">The issue key or ID.</param>
     /// <param name="commentId">The comment ID.</param>
     /// <param name="includeRenderedBody">A value indicating whether to include the HTML rendering of the body.</param>
+    /// <param name="richTextFormat">The format for the body.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The comment.</returns>
     [McpServerTool(Name = "atlassian_jira_get_comment", ReadOnly = true, Idempotent = true, OpenWorld = true)]
-    [Description("Gets the specified comment on a Jira issue.")]
+    [Description("Gets the specified comment on a Jira issue. The body is returned as Markdown by default, with embedded files written as `![name](attachment:ID)`.")]
     public async Task<string> Get(
         [Description("The issue key, such as PROJ-123, or the issue ID.")] string issueKey,
         [Description("The comment ID, from atlassian_jira_get_comments.")] string commentId,
         [Description("When true, the comment also includes its body rendered as HTML.")] bool? includeRenderedBody = null,
+        [Description("The format for the body: markdown (default) or adf.")] string richTextFormat = "markdown",
         CancellationToken cancellationToken = default)
     {
-        string path = new QueryString($"issue/{JiraClient.Segment(issueKey)}/comment/{JiraClient.Segment(commentId)}")
-            .Add("expand", includeRenderedBody == true ? "renderedBody" : null)
+        string Path(bool rendered) => new QueryString($"issue/{JiraClient.Segment(issueKey)}/comment/{JiraClient.Segment(commentId)}")
+            .Add("expand", rendered ? "renderedBody" : null)
             .ToString();
 
-        return ToolResult.Json(await this.jira.GetAsync(path, cancellationToken));
+        return await this.GetCommentsAsync(Path, includeRenderedBody == true, richTextFormat, cancellationToken);
     }
 
     /// <summary>
@@ -93,7 +98,7 @@ public sealed class CommentTools
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The new comment.</returns>
     [McpServerTool(Name = "atlassian_jira_add_comment", OpenWorld = true)]
-    [Description("Adds a comment to the specified Jira issue. The body is Markdown, converted to Atlassian Document Format. Optionally restricts who can see it to a project role or a group.")]
+    [Description("Adds a comment to the specified Jira issue. The body is Markdown, converted to Atlassian Document Format. Optionally restricts who can see it to a project role or a group. Mention a user, notifying them, with `@[Display Name]`, or with `@[Display Name](accountid:ID)` when the account ID is known; a bare @name stays plain text. Embed a file already attached to the issue, shown inline for an image or video and as a file card otherwise, with `![name](attachment:ID)` in a paragraph of its own.")]
     public async Task<string> Add(
         [Description("The issue key, such as PROJ-123, or the issue ID.")] string issueKey,
         [Description("The comment, as Markdown.")] string body,
@@ -101,7 +106,8 @@ public sealed class CommentTools
         [Description("The project role name or group name that may see the comment.")] string? visibilityValue = null,
         CancellationToken cancellationToken = default)
     {
-        JsonObject request = BuildBody(body, visibilityType, visibilityValue);
+        AdfReferences references = await this.jira.ResolveReferencesAsync([body], cancellationToken);
+        JsonObject request = BuildBody(body, visibilityType, visibilityValue, references);
         return ToolResult.Json(await this.jira.SendAsync(HttpMethod.Post, $"issue/{JiraClient.Segment(issueKey)}/comment", request, cancellationToken));
     }
 
@@ -116,7 +122,7 @@ public sealed class CommentTools
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The updated comment.</returns>
     [McpServerTool(Name = "atlassian_jira_update_comment", Idempotent = true, OpenWorld = true)]
-    [Description("Replaces the body of the specified comment on a Jira issue. The body is Markdown, converted to Atlassian Document Format.")]
+    [Description("Replaces the body of the specified comment on a Jira issue. The body is Markdown, converted to Atlassian Document Format. Mention a user, notifying them, with `@[Display Name]`, or with `@[Display Name](accountid:ID)` when the account ID is known; a bare @name stays plain text. Embed a file already attached to the issue, shown inline for an image or video and as a file card otherwise, with `![name](attachment:ID)` in a paragraph of its own.")]
     public async Task<string> Update(
         [Description("The issue key, such as PROJ-123, or the issue ID.")] string issueKey,
         [Description("The comment ID, from atlassian_jira_get_comments.")] string commentId,
@@ -125,7 +131,8 @@ public sealed class CommentTools
         [Description("The project role name or group name that may see the comment.")] string? visibilityValue = null,
         CancellationToken cancellationToken = default)
     {
-        JsonObject request = BuildBody(body, visibilityType, visibilityValue);
+        AdfReferences references = await this.jira.ResolveReferencesAsync([body], cancellationToken);
+        JsonObject request = BuildBody(body, visibilityType, visibilityValue, references);
         string path = $"issue/{JiraClient.Segment(issueKey)}/comment/{JiraClient.Segment(commentId)}";
         return ToolResult.Json(await this.jira.SendAsync(HttpMethod.Put, path, request, cancellationToken));
     }
@@ -155,11 +162,12 @@ public sealed class CommentTools
     /// <param name="body">The comment, as Markdown.</param>
     /// <param name="visibilityType">The kind of restriction, or <see langword="null"/>.</param>
     /// <param name="visibilityValue">The role or group name, or <see langword="null"/>.</param>
+    /// <param name="references">The mentions and embedded attachments, or <see langword="null"/>.</param>
     /// <returns>The request body.</returns>
     /// <exception cref="McpException">The visibility arguments are incomplete or invalid.</exception>
-    internal static JsonObject BuildBody(string body, string? visibilityType, string? visibilityValue)
+    internal static JsonObject BuildBody(string body, string? visibilityType, string? visibilityValue, AdfReferences? references = null)
     {
-        var request = new JsonObject { ["body"] = JiraClient.ToAdf(body) };
+        var request = new JsonObject { ["body"] = JiraClient.ToAdf(body, references) };
 
         bool hasType = !string.IsNullOrWhiteSpace(visibilityType);
         bool hasValue = !string.IsNullOrWhiteSpace(visibilityValue);
@@ -184,5 +192,23 @@ public sealed class CommentTools
         }
 
         return request;
+    }
+
+    /// <summary>
+    /// Gets one comment or a page of comments, in the requested rich-text format.
+    /// </summary>
+    /// <param name="path">Builds the request path, with the rendered body (<see langword="true"/>) or without it.</param>
+    /// <param name="includeRenderedBody">A value indicating whether the caller asked for the rendered body.</param>
+    /// <param name="richTextFormat">markdown or adf.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The result.</returns>
+    private async Task<string> GetCommentsAsync(Func<bool, string> path, bool includeRenderedBody, string richTextFormat, CancellationToken cancellationToken)
+    {
+        if (!JiraRichText.IsMarkdown(richTextFormat))
+        {
+            return ToolResult.Json(await this.jira.GetAsync(path(includeRenderedBody), cancellationToken));
+        }
+
+        return ToolResult.Json(await JiraRichText.GetAsMarkdownAsync(this.jira, path, includeRenderedBody, "renderedBody", cancellationToken));
     }
 }

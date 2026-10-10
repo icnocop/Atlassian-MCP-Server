@@ -7,13 +7,28 @@ A [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that le
 
 > This is an unofficial, community project. It is not affiliated with or endorsed by Atlassian.
 
+## Getting started
+
+1. **Create an API token** at https://id.atlassian.com/manage-profile/security/api-tokens.
+2. **Add the server to your AI assistant.** Follow the guide for your assistant:
+   - [Claude Code](docs/claude-code.md)
+   - [GitHub Copilot in Visual Studio Code](docs/vscode-copilot.md)
+   - [GitHub Copilot in Visual Studio](docs/visual-studio-copilot.md)
+   - [GitHub Copilot CLI](docs/copilot-cli.md)
+
+   If the server does not start, see [Troubleshooting](docs/troubleshooting.md).
+3. **Try it.** Ask your assistant, for example:
+   - "Show me my open Jira issues in project PROJ."
+   - "Create a bug in PROJ for the login timeout, with steps to reproduce."
+   - "Draft a Confluence page in my personal space summarizing PROJ-123." Then open the link it returns to preview the draft.
+
 ## Features
 
 **Jira**
 
 - **Issues**: get, create, update, delete, assign, transition, labels, watchers, votes, and change history.
 - **Custom fields**: set any field, including custom fields, and discover a project's required fields and allowed values before creating an issue.
-- **Markdown everywhere**: descriptions, comments, worklog comments, and multi-line custom fields are written in Markdown and converted to Atlassian Document Format; rich text is read back as Markdown.
+- **Markdown everywhere**: descriptions, comments, worklog comments, and multi-line custom fields are written in Markdown and converted to Atlassian Document Format; rich text is read back as Markdown. Mention a user, notifying them, with `@[Display Name]` (resolved by a user search; an ambiguous name is refused, listing the matches) or `@[Display Name](accountid:ID)`. In Jira, embed a file already attached to the issue with `![name](attachment:ID)` in a paragraph of its own: images and videos are shown inline, other files as file cards. Embedded files are read back the same way.
 - **Search**: JQL search with paging, approximate totals, JQL validation, and value suggestions.
 - **Comments, links, and attachments**: read and write comments, link issues by link type name or phrase (such as "is blocked by"), and upload, download, or delete attachments.
 - **Projects and people**: projects, components, versions, users, groups, and permissions.
@@ -45,20 +60,6 @@ Tools are grouped into [toolsets](#configuration) so you can enable only what yo
 
 The server acts as you: it can see and change only what your account can, and every change appears in Jira and Confluence history under your name.
 
-## Getting started
-
-1. **Create an API token** at https://id.atlassian.com/manage-profile/security/api-tokens.
-2. **Add the server to your AI assistant.** Every client runs the same command, `dnx Atlassian.Mcp.Server --yes`, which downloads the server from NuGet and runs the latest version each time it starts. Follow the guide for your assistant:
-   - [Claude Code](docs/claude-code.md)
-   - [GitHub Copilot in Visual Studio Code](docs/vscode-copilot.md)
-   - [GitHub Copilot in Visual Studio](docs/visual-studio-copilot.md)
-   - [GitHub Copilot CLI](docs/copilot-cli.md)
-   If your workspace has a `global.json` that pins an older .NET SDK, `dnx` cannot run there, because clients start the server in the workspace folder. Install the server as a global tool instead, from a folder without that `global.json`: `dotnet tool install --global Atlassian.Mcp.Server`. Then use `atlassian-mcp-server` as the command, and update it with `dotnet tool update --global Atlassian.Mcp.Server`.
-3. **Try it.** Ask your assistant, for example:
-   - "Show me my open Jira issues in project PROJ."
-   - "Create a bug in PROJ for the login timeout, with steps to reproduce."
-   - "Draft a Confluence page in my personal space summarizing PROJ-123." Then open the link it returns to preview the draft.
-
 ## Configuration
 
 The server is configured with environment variables, which each guide shows how to set.
@@ -71,20 +72,7 @@ The server is configured with environment variables, which each guide shows how 
 | `ATLASSIAN_TOOLSETS` | No | Comma-separated toolsets to enable. Defaults to `all`. |
 | `ATLASSIAN_ENABLED_TOOLS` | No | Comma-separated tool names to enable, to narrow the toolsets further. |
 | `ATLASSIAN_READ_ONLY` | No | `true` to enable only tools that do not change anything. |
-| `ATLASSIAN_ATTACHMENT_FOLDERS` | No | Full paths of the folders whose files the attachment tools may upload by path without asking, separated by `;` on Windows and `:` elsewhere, like `PATH`. |
-
-### Uploading files by path
-
-The attachment tools accept a file as base64 or as the path of a local file. Use a path for anything already on disk, such as a screenshot or a log: base64 makes the model copy hundreds of kilobytes of text character for character, and one wrong character uploads a corrupted file.
-
-A path lets the model send a file from your computer to your site, so the server decides which files it may read, and asks you rather than the model:
-
-- A file in an allowed folder is uploaded without asking. The allowed folders are those in `ATLASSIAN_ATTACHMENT_FOLDERS`, plus those you chose to always allow, which the server saves in `%APPDATA%\Atlassian.Mcp.Server\attachment-folders.json` (`~/.config/Atlassian.Mcp.Server/attachment-folders.json` elsewhere). Remove a folder by editing that file; the change applies immediately, in every client and session.
-- For any other file, the server asks you, through your MCP client, whether to upload it, showing the full path, its size, and where it goes: **Allow once**, **Always allow** its folder, or **Deny**. This uses MCP [elicitation](https://modelcontextprotocol.io/specification/draft/client/elicitation), which Claude Code and GitHub Copilot in VS Code support. A question not answered within two minutes counts as Deny.
-- In a client that cannot ask, such as Claude Desktop, a file outside the allowed folders is refused.
-- Relative paths, files over 100 MB, and files reached through a symbolic link or junction are always refused. Folders are compared as written: a Windows 8.3 short path such as `C:\Users\FIRSTN~1\…` does not match the same folder written in full.
-
-List or always allow only folders whose files you are willing to share, such as a screenshots folder. `atlassian_jira_get_configuration` shows both lists.
+| `ATLASSIAN_ATTACHMENT_FOLDERS` | No | Full paths of the folders whose files the attachment tools may upload by path without asking, separated by `;` on Windows and `:` elsewhere, like `PATH`. See [Uploading files by path](docs/uploading-files.md). |
 
 | Toolset | Tools for |
 |---|---|
@@ -108,6 +96,8 @@ Some clients limit how many tools they send to the model; GitHub Copilot allows 
 ## More information
 
 - [Tools](docs/tools.md)
+- [Uploading files by path](docs/uploading-files.md)
+- [Troubleshooting](docs/troubleshooting.md)
 - [Contributing](CONTRIBUTING.md)
 - [Changes](CHANGELOG.md)
 

@@ -58,6 +58,22 @@ public sealed class AdfInspectorTests
     }
 
     /// <summary>
+    /// Verifies that a mention, which Markdown writes back as the same mention, is not lossy.
+    /// </summary>
+    [TestMethod]
+    public void FindLossyContent_WithMention_ReturnsEmpty()
+    {
+        // Arrange
+        JsonObject document = MarkdownToAdf.Convert("Ask @[Jane](accountid:abc)");
+
+        // Act
+        IReadOnlyDictionary<string, int> counts = AdfInspector.FindLossyContent(document);
+
+        // Assert
+        Assert.AreEqual(0, counts.Count);
+    }
+
+    /// <summary>
     /// Verifies that the description lists each count and type.
     /// </summary>
     [TestMethod]

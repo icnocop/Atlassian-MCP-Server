@@ -133,7 +133,7 @@ public sealed class PageTools
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The new page, with the URL to preview it.</returns>
     [McpServerTool(Name = "atlassian_confluence_create_page", OpenWorld = true)]
-    [Description("Creates a Confluence page. By default it is saved as a private draft that only you can see, so you can preview it in Confluence and publish it there or with atlassian_confluence_publish_page. Only publish directly when the user explicitly asks to.")]
+    [Description("Creates a Confluence page. By default it is saved as a private draft that only you can see, so you can preview it in Confluence and publish it there or with atlassian_confluence_publish_page. Only publish directly when the user explicitly asks to. Mention a user, notifying them, with `@[Display Name]`, or with `@[Display Name](accountid:ID)` when the account ID is known; a bare @name stays plain text.")]
     public async Task<string> Create(
         [Description("The page title.")] string title,
         [Description("The page body, in the format given by bodyFormat.")] string body,
@@ -152,7 +152,7 @@ public sealed class PageTools
             ["spaceId"] = spaceId,
             ["status"] = publish ? "current" : "draft",
             ["title"] = title,
-            ["body"] = ConfluenceContent.ToRequestBody(body, bodyFormat),
+            ["body"] = await ConfluenceContent.ToRequestBodyAsync(this.confluence, body, bodyFormat, cancellationToken),
         };
 
         if (!string.IsNullOrWhiteSpace(parentId))
@@ -189,7 +189,7 @@ public sealed class PageTools
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>A confirmation, with the URL to preview the change.</returns>
     [McpServerTool(Name = "atlassian_confluence_update_page", OpenWorld = true)]
-    [Description("Replaces the body and/or title of the specified Confluence page. By default the change is saved as a draft and the published page does not change, so the user can preview it in Confluence. A Markdown body is refused when the page has content Markdown cannot represent (macros, smart links, media, panels); use atlassian_confluence_update_page_section, or bodyFormat adf, instead.")]
+    [Description("Replaces the body and/or title of the specified Confluence page. By default the change is saved as a draft and the published page does not change, so the user can preview it in Confluence. A Markdown body is refused when the page has content Markdown cannot represent (macros, smart links, media, panels); use atlassian_confluence_update_page_section, or bodyFormat adf, instead. Mention a user, notifying them, with `@[Display Name]`, or with `@[Display Name](accountid:ID)` when the account ID is known; a bare @name stays plain text.")]
     public async Task<string> Update(
         [Description("The page ID.")] string pageId,
         [Description("Optional new body, in the format given by bodyFormat. Replaces the whole body. Omit to change only the title.")] string? body = null,
@@ -229,7 +229,7 @@ public sealed class PageTools
                 }
             }
 
-            requestBody = ConfluenceContent.ToRequestBody(body, format);
+            requestBody = await ConfluenceContent.ToRequestBodyAsync(this.confluence, body, format, cancellationToken);
         }
 
         string newTitle = string.IsNullOrWhiteSpace(title) ? (draft ?? current)["title"]!.GetValue<string>() : title.Trim();
@@ -248,7 +248,7 @@ public sealed class PageTools
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>A confirmation, with the URL to preview the change.</returns>
     [McpServerTool(Name = "atlassian_confluence_update_page_section", OpenWorld = true)]
-    [Description("Replaces the content under one heading of the specified Confluence page with Markdown, keeping the rest of the page (including macros and smart links) exactly as it is. The section runs to the next heading of the same or a higher level. By default the change is saved as a draft, building on any existing draft, and the published page does not change.")]
+    [Description("Replaces the content under one heading of the specified Confluence page with Markdown, keeping the rest of the page (including macros and smart links) exactly as it is. The section runs to the next heading of the same or a higher level. By default the change is saved as a draft, building on any existing draft, and the published page does not change. Mention a user, notifying them, with `@[Display Name]`, or with `@[Display Name](accountid:ID)` when the account ID is known; a bare @name stays plain text.")]
     public async Task<string> UpdateSection(
         [Description("The page ID.")] string pageId,
         [Description("The text of the heading that starts the section, such as Installation. Not the page title.")] string heading,
@@ -262,11 +262,12 @@ public sealed class PageTools
         JsonNode? draft = await this.TryGetDraftAsync(pageId, "adf", cancellationToken);
         JsonNode basis = draft ?? published ?? throw new McpException($"Page {pageId} was not found, or you cannot see it.");
         string title = basis["title"]!.GetValue<string>();
+        AdfReferences references = await this.confluence.ResolveReferencesAsync([body], cancellationToken);
 
         (JsonObject document, JsonArray removed) = AdfSections.Replace(
             ConfluenceContent.ReadAdf(basis),
             heading,
-            MarkdownToAdf.Convert(body),
+            MarkdownToAdf.Convert(body, references),
             title);
 
         IReadOnlyDictionary<string, int> lossy = AdfInspector.FindLossyContent(removed);

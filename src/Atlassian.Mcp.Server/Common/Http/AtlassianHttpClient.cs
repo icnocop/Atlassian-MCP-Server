@@ -164,6 +164,23 @@ public class AtlassianHttpClient
     }
 
     /// <summary>
+    /// Sends a GET request for content that Atlassian serves from its media service, and returns the
+    /// URL the request was redirected to, without downloading the content: only the response
+    /// headers are read before the response is discarded.
+    /// </summary>
+    /// <param name="path">The path relative to the site root.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The final URL of the request.</returns>
+    public virtual async Task<Uri?> GetRedirectTargetAsync(string path, CancellationToken cancellationToken)
+    {
+        using HttpResponseMessage response = await this.SendWithRetryAsync(
+            () => new HttpRequestMessage(HttpMethod.Get, path),
+            cancellationToken);
+
+        return response.RequestMessage?.RequestUri;
+    }
+
+    /// <summary>
     /// Builds the message for a failed response from the error formats that Jira and Confluence use.
     /// </summary>
     /// <param name="statusCode">The status code.</param>

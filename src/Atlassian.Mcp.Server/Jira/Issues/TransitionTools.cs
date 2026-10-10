@@ -98,9 +98,10 @@ public sealed class TransitionTools
 
         if (!string.IsNullOrWhiteSpace(comment))
         {
+            JsonObject? adf = await this.jira.ToAdfAsync(comment, cancellationToken);
             body["update"] = new JsonObject
             {
-                ["comment"] = new JsonArray(new JsonObject { ["add"] = new JsonObject { ["body"] = JiraClient.ToAdf(comment) } }),
+                ["comment"] = new JsonArray(new JsonObject { ["add"] = new JsonObject { ["body"] = adf } }),
             };
         }
 

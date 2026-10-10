@@ -209,6 +209,40 @@ public sealed class IssueToolsTests : IDisposable
     }
 
     /// <summary>
+    /// Verifies that an issue whose description and comments embed files is requested again with
+    /// renderedFields, added to the caller's own expand, that the files are written as
+    /// ![name](attachment:ID), and that renderedFields, which was not asked for, is removed again.
+    /// </summary>
+    /// <returns>A task.</returns>
+    [TestMethod]
+    public async Task Get_WithEmbeddedFiles_WritesAttachmentReferences()
+    {
+        // Arrange
+        const string Fields = """
+            {"summary":"Crash on start",
+             "description":{"type":"doc","version":1,"content":[{"type":"mediaSingle","attrs":{"layout":"align-start"},"content":[{"type":"media","attrs":{"type":"file","id":"33333333-0000-0000-0000-000000000001","alt":"crash.png","collection":""}}]}]},
+             "comment":{"comments":[{"id":"1","body":{"type":"doc","version":1,"content":[{"type":"mediaGroup","content":[{"type":"media","attrs":{"type":"file","id":"33333333-0000-0000-0000-000000000002","collection":""}}]}]}}]}}
+            """;
+        const string RenderedFields = """
+            {"description":"<p><img src=\"/rest/api/3/attachment/content/401\" alt=\"crash.png\" /></p>",
+             "comment":{"comments":[{"id":"1","body":"<p><a href=\"/rest/api/3/attachment/content/402\" data-attachment-name=\"dump.zip\" data-media-services-id=\"33333333-0000-0000-0000-000000000002\">dump.zip</a></p>"}]}}
+            """;
+        this.http
+            .Respond($$"""{"key":"PROJ-1","fields":{{Fields}}}""")
+            .Respond($$"""{"key":"PROJ-1","fields":{{Fields}},"renderedFields":{{RenderedFields}}}""");
+
+        // Act
+        JsonNode result = JsonNode.Parse(await this.tools.Get("PROJ-1", expand: "changelog"))!;
+
+        // Assert
+        Assert.AreEqual("rest/api/3/issue/PROJ-1?expand=changelog", this.http.Requests[0].Path);
+        Assert.AreEqual("rest/api/3/issue/PROJ-1?expand=changelog%2CrenderedFields", this.http.Requests[1].Path);
+        Assert.AreEqual("![crash.png](attachment:401)", result["fields"]!["description"]!.GetValue<string>());
+        Assert.AreEqual("![dump.zip](attachment:402)", result["fields"]!["comment"]!["comments"]![0]!["body"]!.GetValue<string>());
+        Assert.IsNull(result["renderedFields"]);
+    }
+
+    /// <summary>
     /// Verifies that without an issue type, the project's issue types are listed.
     /// </summary>
     /// <returns>A task.</returns>
