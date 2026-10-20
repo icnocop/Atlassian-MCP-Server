@@ -97,6 +97,7 @@ Some clients limit how many tools they send to the model; GitHub Copilot allows 
 
 - [Tools](docs/tools.md)
 - [Uploading files by path](docs/uploading-files.md)
+- [After updating the server](docs/updating-the-server.md)
 - [Troubleshooting](docs/troubleshooting.md)
 - [Contributing](CONTRIBUTING.md)
 - [Changes](CHANGELOG.md)

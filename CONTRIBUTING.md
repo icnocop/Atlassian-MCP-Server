@@ -47,6 +47,15 @@ The [MCP Inspector](https://github.com/modelcontextprotocol/inspector) (`npx @mo
 - Add unit tests in the matching folder under `tests/Atlassian.Mcp.Server.Tests/`. `RecordingHttpClient` records requests and returns queued responses, so tests need no Atlassian site.
 - Run `build/Update-ToolsDoc.ps1` to regenerate [docs/tools.md](docs/tools.md); a test fails when a tool is missing from it.
 
+### Keep existing callers safe
+
+An MCP client can keep using a tool's old schema after the server is updated; for example, a resumed Claude Code session may still have the parameters it loaded before. The server checks every call's argument names against the current schema and refuses unknown or missing ones, but it can't tell when a parameter with the same name now means something else. So:
+
+- **Never change what an existing parameter means**, including its accepted values, units, or default. If the meaning has to change, add a parameter with a new name instead, and remove the old one: a caller with the old schema then gets a clear refusal that lists the current parameters, rather than a different result.
+- **Only add optional parameters, with a default that keeps the old behavior.** For example, `restrictions` on `atlassian_confluence_publish_page` leaves a page's restrictions unchanged when it's left out.
+- **Don't add a required parameter to an existing tool.** Give it a default, or add a new tool.
+- To remove or rename a parameter or a tool, note it under a **Changed** or **Removed** heading in [CHANGELOG.md](CHANGELOG.md).
+
 ## Pull requests
 
 - Branch from `main` and open a pull request against `main`.
