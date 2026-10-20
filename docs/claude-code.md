@@ -57,3 +57,5 @@ Claude Code shows the tools as `mcp__atlassian__<tool>`, such as `mcp__atlassian
 ## Updates
 
 `dnx` runs the latest version from NuGet each time Claude Code starts the server. To stay on one version, use `Atlassian.Mcp.Server@<version>` in place of `Atlassian.Mcp.Server`.
+
+After an update, start a new session rather than resuming one: a resumed session keeps the tool definitions of the version it started with. See [After updating the server](updating-the-server.md), which also has a hook that warns you when that happens.
