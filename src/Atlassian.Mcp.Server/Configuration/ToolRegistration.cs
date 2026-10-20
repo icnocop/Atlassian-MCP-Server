@@ -3,7 +3,9 @@
 // </copyright>
 
 using System.Reflection;
+using Atlassian.Mcp.Server.Common;
 using Microsoft.Extensions.DependencyInjection;
+using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
 
 namespace Atlassian.Mcp.Server.Configuration;
@@ -70,7 +72,8 @@ public static class ToolRegistration
     }
 
     /// <summary>
-    /// Adds the tools that the options enable to the MCP server.
+    /// Adds the tools that the options enable to the MCP server, and a filter that refuses a call
+    /// whose argument names do not match the tool's parameters.
     /// </summary>
     /// <param name="builder">The MCP server builder.</param>
     /// <param name="options">The options.</param>
@@ -92,6 +95,15 @@ public static class ToolRegistration
                     new McpServerToolCreateOptions { Services = services }));
         }
 
-        return builder;
+        return builder.WithRequestFilters(filters => filters.AddCallToolFilter(next => async (context, cancellationToken) =>
+        {
+            if (context.MatchedPrimitive is McpServerTool tool
+                && ToolArgumentValidator.Validate(tool.ProtocolTool.Name, tool.ProtocolTool.InputSchema, context.Params?.Arguments?.Keys.ToList()) is string error)
+            {
+                return new CallToolResult { IsError = true, Content = [new TextContentBlock { Text = error }] };
+            }
+
+            return await next(context, cancellationToken);
+        }));
     }
 }
