@@ -318,11 +318,11 @@ public sealed class PageTools
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>A confirmation.</returns>
     [McpServerTool(Name = "atlassian_confluence_move_page", Idempotent = true, OpenWorld = true)]
-    [Description("Moves the specified Confluence page, with its children: under another page, or before or after a sibling page. The target can be in another space.")]
+    [Description("Moves the specified Confluence page, with its children: under another page, or before or after a sibling page. The target can be in another space. To reorder the child pages of a parent, use before or after a sibling: append does not move a page that is already a child of the target.")]
     public async Task<string> Move(
         [Description("The ID of the page to move.")] string pageId,
         [Description("The ID of the target page.")] string targetPageId,
-        [Description("Where to move the page: append (as the last child of the target, the default), before, or after the target.")] string position = "append",
+        [Description("Where to move the page: append (as the last child of the target, the default; refused when the page is already its child), before, or after the target.")] string position = "append",
         CancellationToken cancellationToken = default)
     {
         string where = position.Trim().ToUpperInvariant() switch
@@ -332,6 +332,19 @@ public sealed class PageTools
             "AFTER" => "after",
             _ => throw new McpException("The position parameter must be append, before, or after."),
         };
+
+        if (where == "append")
+        {
+            // Confluence reports success for an append to the current parent but leaves the page
+            // where it is, so a caller reordering child pages would believe it worked.
+            JsonNode page = await this.GetPublishedOrDraftAsync(pageId, "adf", cancellationToken);
+            if (string.Equals(page["parentId"]?.ToString(), targetPageId, StringComparison.Ordinal))
+            {
+                throw new McpException(
+                    $"Page {pageId} is already a child of page {targetPageId}, and Confluence does not move a page that is appended to its own parent. "
+                    + "To change its order, move it with position before or after a sibling page.");
+            }
+        }
 
         await this.confluence.SendV1Async(HttpMethod.Put, $"content/{Segment(pageId)}/move/{where}/{Segment(targetPageId)}", body: null, cancellationToken);
         return ToolResult.Success($"Moved page {pageId} ({where} page {targetPageId}).");

@@ -96,6 +96,60 @@ public sealed class PageToolsTests
     }
 
     /// <summary>
+    /// Verifies that appending a page to its own parent is refused instead of reported as moved,
+    /// because Confluence leaves the page where it is.
+    /// </summary>
+    /// <returns>A task.</returns>
+    [TestMethod]
+    public async Task Move_AppendToCurrentParent_ThrowsAndDoesNotMove()
+    {
+        // Arrange
+        this.http.Respond("""{"id":"5","title":"T","status":"current","parentId":"1"}""");
+
+        // Act
+        McpException exception = await Assert.ThrowsExactlyAsync<McpException>(() => this.tools.Move("5", "1"));
+
+        // Assert
+        StringAssert.Contains(exception.Message, "before or after a sibling page", StringComparison.Ordinal);
+        Assert.HasCount(1, this.http.Requests);
+    }
+
+    /// <summary>
+    /// Verifies that appending a page to another parent moves it.
+    /// </summary>
+    /// <returns>A task.</returns>
+    [TestMethod]
+    public async Task Move_AppendToOtherParent_MovesPage()
+    {
+        // Arrange
+        this.http.Respond("""{"id":"5","title":"T","status":"current","parentId":"2"}""").Respond("{}");
+
+        // Act
+        await this.tools.Move("5", "1");
+
+        // Assert
+        StringAssert.EndsWith(this.http.LastRequest.Path, "content/5/move/append/1", StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Verifies that moving a page after a sibling sends the move without looking up the page.
+    /// </summary>
+    /// <returns>A task.</returns>
+    [TestMethod]
+    public async Task Move_AfterSibling_MovesWithoutLookingUpPage()
+    {
+        // Arrange
+        this.http.Respond("{}");
+
+        // Act
+        await this.tools.Move("5", "6", "after");
+
+        // Assert
+        Assert.HasCount(1, this.http.Requests);
+        StringAssert.EndsWith(this.http.LastRequest.Path, "content/5/move/after/6", StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// Verifies that a new page is a private draft by default.
     /// </summary>
     /// <returns>A task.</returns>
