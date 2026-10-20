@@ -325,6 +325,26 @@ public sealed class PageTools
     }
 
     /// <summary>
+    /// Discards the unpublished changes of the specified page.
+    /// </summary>
+    /// <param name="pageId">The page ID.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>A confirmation.</returns>
+    [McpServerTool(Name = "atlassian_confluence_discard_draft", Destructive = true, Idempotent = true, OpenWorld = true)]
+    [Description("Discards the unpublished changes (the draft) of the specified published Confluence page, by everyone, like Revert to last published version in the editor: the draft goes back to the published page, and the page is no longer marked as having unpublished changes. The published page does not change, and no version is added. The discarded changes cannot be recovered, so only call this when the user asks to discard them. A page that was never published has nothing to revert to and is refused.")]
+    public async Task<string> DiscardDraft(
+        [Description("The page ID.")] string pageId,
+        CancellationToken cancellationToken = default)
+    {
+        JsonNode published = await this.TryGetPublishedAsync(pageId, cancellationToken)
+            ?? throw new McpException($"Page {pageId} has never been published, so there is no published version to revert its draft to. A draft that was never published can only be deleted, with atlassian_confluence_delete_page.");
+
+        await this.confluence.DiscardUnpublishedChangesAsync(pageId.Trim(), cancellationToken);
+        int version = published["version"]?["number"]?.GetValue<int>() ?? 0;
+        return ToolResult.Success($"Discarded the unpublished changes of page {pageId}. Its draft is back to published version {version}, and the published page is unchanged.");
+    }
+
+    /// <summary>
     /// Moves the specified page.
     /// </summary>
     /// <param name="pageId">The page ID.</param>

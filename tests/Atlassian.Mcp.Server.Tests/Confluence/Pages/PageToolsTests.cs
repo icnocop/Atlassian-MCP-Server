@@ -449,6 +449,47 @@ public sealed class PageToolsTests
     }
 
     /// <summary>
+    /// Verifies that discarding makes the collaborative editing call that the editor's Revert to last
+    /// published version makes, and does not write the page.
+    /// </summary>
+    /// <returns>A task.</returns>
+    [TestMethod]
+    public async Task DiscardDraft_WithPublishedPage_DeletesUnpublishedChanges()
+    {
+        // Arrange
+        this.http.Respond(PageJson("current", 4, "published text")).Respond(null);
+
+        // Act
+        string result = await this.tools.DiscardDraft("1");
+
+        // Assert
+        Assert.HasCount(2, this.http.Requests);
+        RecordedRequest request = this.http.LastRequest;
+        Assert.AreEqual(HttpMethod.Delete, request.Method);
+        Assert.AreEqual("wiki/rest/collab/1.0/content/1/changes/unpublished", request.Path);
+        Assert.AreEqual("1", request.Body!["contentId"]!.GetValue<string>());
+        StringAssert.Contains(result, "published version 4", StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Verifies that a page that was never published is refused, because there is nothing to revert to.
+    /// </summary>
+    /// <returns>A task.</returns>
+    [TestMethod]
+    public async Task DiscardDraft_WithNeverPublishedPage_Throws()
+    {
+        // Arrange
+        this.http.Fail(new AtlassianApiException(HttpStatusCode.NotFound, "Not found"));
+
+        // Act
+        McpException exception = await Assert.ThrowsExactlyAsync<McpException>(() => this.tools.DiscardDraft("1"));
+
+        // Assert
+        StringAssert.Contains(exception.Message, "never been published", StringComparison.Ordinal);
+        Assert.HasCount(1, this.http.Requests);
+    }
+
+    /// <summary>
     /// Verifies that publishing a page that was never published creates version 1.
     /// </summary>
     /// <returns>A task.</returns>
