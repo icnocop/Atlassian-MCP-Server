@@ -7,9 +7,9 @@ using System.Text.Json.Nodes;
 namespace Atlassian.Mcp.Server.Jira;
 
 /// <summary>
-/// Site-wide Jira definitions that do not change during a session: which fields hold rich text,
-/// and the issue link types. Each is fetched at most once per process, because a tool call that
-/// needs them would otherwise pay a round trip every time.
+/// Site-wide Jira definitions that do not change during a session: the fields (which hold rich
+/// text, and their names), and the issue link types. Each is fetched at most once per process,
+/// because a tool call that needs them would otherwise pay a round trip every time.
 /// </summary>
 public sealed class JiraMetadataCache : IDisposable
 {
@@ -24,6 +24,7 @@ public sealed class JiraMetadataCache : IDisposable
 
     private readonly SemaphoreSlim gate = new(1, 1);
     private HashSet<string>? richTextFieldIds;
+    private Dictionary<string, string>? fieldNames;
     private List<JsonObject>? linkTypes;
 
     /// <summary>
@@ -34,23 +35,20 @@ public sealed class JiraMetadataCache : IDisposable
     /// <returns>The field IDs, compared case-insensitively.</returns>
     public async Task<IReadOnlySet<string>> GetRichTextFieldIdsAsync(JiraClient client, CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(client);
+        await this.LoadFieldsAsync(client, cancellationToken);
+        return this.richTextFieldIds!;
+    }
 
-        await this.gate.WaitAsync(cancellationToken);
-        try
-        {
-            if (this.richTextFieldIds is null)
-            {
-                JsonNode? fields = await client.GetAsync("field", cancellationToken);
-                this.richTextFieldIds = SelectRichTextFieldIds(fields);
-            }
-
-            return this.richTextFieldIds;
-        }
-        finally
-        {
-            this.gate.Release();
-        }
+    /// <summary>
+    /// Gets the names of the fields, such as "Severity" for <c>customfield_10050</c>, keyed by field ID.
+    /// </summary>
+    /// <param name="client">The Jira client used on the first call.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The field names, keyed by field ID compared case-insensitively.</returns>
+    public async Task<IReadOnlyDictionary<string, string>> GetFieldNamesAsync(JiraClient client, CancellationToken cancellationToken)
+    {
+        await this.LoadFieldsAsync(client, cancellationToken);
+        return this.fieldNames!;
     }
 
     /// <summary>
@@ -107,6 +105,7 @@ public sealed class JiraMetadataCache : IDisposable
         try
         {
             this.richTextFieldIds = null;
+            this.fieldNames = null;
             this.linkTypes = null;
         }
         finally
@@ -134,8 +133,53 @@ public sealed class JiraMetadataCache : IDisposable
             .Where(id => id.Length > 0)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// Selects the names of the fields from the response of the fields endpoint.
+    /// </summary>
+    /// <param name="fields">The array of field definitions.</param>
+    /// <returns>The field names, keyed by field ID.</returns>
+    internal static Dictionary<string, string> SelectFieldNames(JsonNode? fields)
+    {
+        var names = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (JsonObject field in (fields as JsonArray ?? []).OfType<JsonObject>())
+        {
+            if ((string?)field["id"] is { Length: > 0 } id && (string?)field["name"] is { Length: > 0 } name)
+            {
+                names[id] = name;
+            }
+        }
+
+        return names;
+    }
+
     private static bool Matches(JsonNode? candidate, string name)
         => candidate is JsonValue value
            && value.TryGetValue(out string? text)
            && string.Equals(text, name, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Fetches the field definitions once, and derives everything cached from them.
+    /// </summary>
+    /// <param name="client">The Jira client.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>A task.</returns>
+    private async Task LoadFieldsAsync(JiraClient client, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(client);
+
+        await this.gate.WaitAsync(cancellationToken);
+        try
+        {
+            if (this.richTextFieldIds is null || this.fieldNames is null)
+            {
+                JsonNode? fields = await client.GetAsync("field", cancellationToken);
+                this.richTextFieldIds = SelectRichTextFieldIds(fields);
+                this.fieldNames = SelectFieldNames(fields);
+            }
+        }
+        finally
+        {
+            this.gate.Release();
+        }
+    }
 }

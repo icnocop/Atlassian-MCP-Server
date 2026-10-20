@@ -84,6 +84,29 @@ public sealed class LiveSiteTests : IDisposable
     }
 
     /// <summary>
+    /// Verifies that the test issue's transitions, including the ones a workflow condition hides, can be
+    /// listed with their availability, and with the workflow's rules or why they could not be read.
+    /// </summary>
+    /// <returns>A task.</returns>
+    [TestMethod]
+    public async Task GetTransitions_IncludingUnavailable_ListsAvailabilityAndRules()
+    {
+        // Arrange
+        string issueKey = Require("ATLASSIAN_TEST_JIRA_ISSUE_KEY");
+
+        // Act
+        JsonArray transitions = JsonNode.Parse(await new TransitionTools(new JiraClient(this.http), this.metadata).GetAll(issueKey, includeUnavailable: true))!.AsArray();
+
+        // Assert
+        Assert.IsNotEmpty(transitions);
+        foreach (JsonNode? transition in transitions)
+        {
+            Assert.IsNotNull(transition!["isAvailable"], $"Transition {transition["id"]} has no isAvailable.");
+            Console.WriteLine($"{transition["id"]} {transition["name"]} -> {transition["toStatus"]}: isAvailable={transition["isAvailable"]}, conditions={transition["conditions"]}, validators={transition["validators"]?.ToJsonString()}, rulesUnavailable={transition["rulesUnavailable"]}");
+        }
+    }
+
+    /// <summary>
     /// Verifies that a new page is saved as a private draft, can be read back, and can be deleted.
     /// </summary>
     /// <returns>A task.</returns>
