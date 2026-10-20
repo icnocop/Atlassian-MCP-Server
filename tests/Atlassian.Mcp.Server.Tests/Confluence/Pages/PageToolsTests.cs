@@ -193,6 +193,113 @@ public sealed class PageToolsTests
     }
 
     /// <summary>
+    /// Verifies that a page published as private is created with the private flag.
+    /// </summary>
+    /// <returns>A task.</returns>
+    [TestMethod]
+    public async Task Create_WithPublishAndPrivate_SendsPrivate()
+    {
+        // Arrange
+        this.http.Respond("""{"id":"1","title":"T","status":"current"}""");
+
+        // Act
+        string result = await this.tools.Create("T", "Hello", spaceKey: "9", publish: true, restrictions: "private");
+
+        // Assert
+        Assert.AreEqual("wiki/api/v2/pages?private=true", this.http.LastRequest.Path);
+        Assert.AreEqual("private", JsonNode.Parse(result)!["restrictions"]!.GetValue<string>());
+    }
+
+    /// <summary>
+    /// Verifies that an edit-restricted page is created without the private flag, then restricted so
+    /// that only the current user can edit it.
+    /// </summary>
+    /// <returns>A task.</returns>
+    [TestMethod]
+    public async Task Create_WithEditRestricted_RestrictsUpdateToCurrentUser()
+    {
+        // Arrange
+        this.http
+            .Respond("""{"id":"1","title":"T","status":"current"}""")
+            .Respond("""{"accountId":"me"}""")
+            .Respond("{}");
+
+        // Act
+        await this.tools.Create("T", "Hello", spaceKey: "9", publish: true, restrictions: "edit-restricted");
+
+        // Assert
+        Assert.AreEqual("wiki/api/v2/pages", this.http.Requests[0].Path);
+        RecordedRequest restriction = this.http.LastRequest;
+        Assert.AreEqual(HttpMethod.Put, restriction.Method);
+        StringAssert.EndsWith(restriction.Path, "content/1/restriction", StringComparison.Ordinal);
+        JsonArray operations = restriction.Body!.AsArray();
+        Assert.HasCount(2, operations);
+        Assert.AreEqual("read", operations[0]!["operation"]!.GetValue<string>());
+        Assert.HasCount(0, operations[0]!["restrictions"]!["user"]!.AsArray());
+        Assert.AreEqual("update", operations[1]!["operation"]!.GetValue<string>());
+        Assert.AreEqual("me", operations[1]!["restrictions"]!["user"]![0]!["accountId"]!.GetValue<string>());
+    }
+
+    /// <summary>
+    /// Verifies that an unknown restrictions value is refused before anything is sent.
+    /// </summary>
+    /// <returns>A task.</returns>
+    [TestMethod]
+    public async Task Create_WithUnknownRestrictions_ThrowsAndSendsNothing()
+    {
+        // Act
+        McpException exception = await Assert.ThrowsExactlyAsync<McpException>(
+            () => this.tools.Create("T", "Hello", spaceKey: "9", restrictions: "public"));
+
+        // Assert
+        StringAssert.Contains(exception.Message, "open, edit-restricted, or private", StringComparison.Ordinal);
+        Assert.HasCount(0, this.http.Requests);
+    }
+
+    /// <summary>
+    /// Verifies that an update with restrictions private restricts viewing and editing to the current user.
+    /// </summary>
+    /// <returns>A task.</returns>
+    [TestMethod]
+    public async Task Update_WithPrivate_RestrictsReadAndUpdateToCurrentUser()
+    {
+        // Arrange
+        this.http
+            .Respond(PageJson("current", 4, "old"))
+            .Respond(PageJson("current", 4, "old"))
+            .Respond(PageJson("draft", 1, "new"))
+            .Respond("""{"accountId":"me"}""")
+            .Respond("{}");
+
+        // Act
+        await this.tools.Update("1", body: "new", restrictions: "private");
+
+        // Assert
+        JsonArray operations = this.http.LastRequest.Body!.AsArray();
+        CollectionAssert.AreEqual(
+            new[] { "read", "update" },
+            operations.Select(operation => operation!["operation"]!.GetValue<string>()).ToArray());
+    }
+
+    /// <summary>
+    /// Verifies that an update without restrictions leaves them unchanged.
+    /// </summary>
+    /// <returns>A task.</returns>
+    [TestMethod]
+    public async Task Update_WithoutRestrictions_DoesNotChangeThem()
+    {
+        // Arrange
+        this.http.Respond(PageJson("current", 4, "old")).Respond(PageJson("current", 4, "old")).Respond(PageJson("draft", 1, "new"));
+
+        // Act
+        await this.tools.Update("1", body: "new");
+
+        // Assert
+        Assert.HasCount(3, this.http.Requests);
+        Assert.IsFalse(this.http.Requests.Any(request => request.Path.Contains("restriction", StringComparison.Ordinal)));
+    }
+
+    /// <summary>
     /// Verifies that an update is saved as a draft with version 1 and the default message.
     /// </summary>
     /// <returns>A task.</returns>
@@ -315,6 +422,30 @@ public sealed class PageToolsTests
         Assert.AreEqual("current", body["status"]!.GetValue<string>());
         Assert.AreEqual(4, body["version"]!["number"]!.GetValue<int>());
         StringAssert.Contains(body["body"]!["value"]!.GetValue<string>(), "draft text", StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Verifies that publishing with restrictions open removes every restriction of the page.
+    /// </summary>
+    /// <returns>A task.</returns>
+    [TestMethod]
+    public async Task Publish_WithOpen_RemovesRestrictions()
+    {
+        // Arrange
+        this.http
+            .Respond(PageJson("draft", 1, "draft text"))
+            .Fail(new AtlassianApiException(HttpStatusCode.NotFound, "Not found"))
+            .Respond(PageJson("current", 1, "draft text"))
+            .Respond(null);
+
+        // Act
+        string result = await this.tools.Publish("1", restrictions: "open");
+
+        // Assert
+        RecordedRequest request = this.http.LastRequest;
+        Assert.AreEqual(HttpMethod.Delete, request.Method);
+        StringAssert.EndsWith(request.Path, "content/1/restriction", StringComparison.Ordinal);
+        Assert.AreEqual("open", JsonNode.Parse(result)!["restrictions"]!.GetValue<string>());
     }
 
     /// <summary>
