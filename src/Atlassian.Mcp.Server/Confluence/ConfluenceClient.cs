@@ -74,6 +74,25 @@ public class ConfluenceClient
         => this.Http.SendAsync(method, V1Path + path, body, cancellationToken);
 
     /// <summary>
+    /// Discards the unpublished changes of a published page, by everyone, as the editor's Revert to last
+    /// published version does.
+    /// </summary>
+    /// <param name="pageId">The page ID.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>A task.</returns>
+    /// <remarks>
+    /// The public REST APIs cannot do this: deleting the draft of a published page is refused
+    /// (content.delete.published), and replacing the draft with the published body leaves the page marked
+    /// as having unpublished changes. This is the collaborative editing call that the editor itself makes.
+    /// </remarks>
+    public Task<JsonNode?> DiscardUnpublishedChangesAsync(string pageId, CancellationToken cancellationToken)
+        => this.Http.SendAsync(
+            HttpMethod.Delete,
+            $"wiki/rest/collab/1.0/content/{Uri.EscapeDataString(pageId)}/changes/unpublished",
+            new JsonObject { ["contentId"] = pageId },
+            cancellationToken);
+
+    /// <summary>
     /// Builds the browser URL of a path that Confluence returns in a <c>_links</c> object.
     /// </summary>
     /// <param name="relativePath">The path, such as <c>/spaces/DOC/pages/123/Title</c>.</param>
