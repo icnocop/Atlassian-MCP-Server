@@ -129,11 +129,11 @@ public sealed class PageTools
     /// <param name="parentId">The parent page ID.</param>
     /// <param name="bodyFormat">The body format.</param>
     /// <param name="publish">A value indicating whether to publish the page instead of saving a draft.</param>
-    /// <param name="restrictToMe">A value indicating whether only the creator can see and edit the page.</param>
+    /// <param name="restrictions">Who can view and edit the page.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The new page, with the URL to preview it.</returns>
     [McpServerTool(Name = "atlassian_confluence_create_page", OpenWorld = true)]
-    [Description("Creates a Confluence page. By default it is saved as a private draft that only you can see, so you can preview it in Confluence and publish it there or with atlassian_confluence_publish_page. Only publish directly when the user explicitly asks to. Mention a user, notifying them, with `@[Display Name]`, or with `@[Display Name](accountid:ID)` when the account ID is known; a bare @name stays plain text.")]
+    [Description("Creates a Confluence page. By default it is saved as a private draft that only you can see, so you can preview it in Confluence and publish it there or with atlassian_confluence_publish_page. A private draft stays private when it is published, unless restrictions is set to open or edit-restricted. Only publish directly when the user explicitly asks to. Mention a user, notifying them, with `@[Display Name]`, or with `@[Display Name](accountid:ID)` when the account ID is known; a bare @name stays plain text.")]
     public async Task<string> Create(
         [Description("The page title.")] string title,
         [Description("The page body, in the format given by bodyFormat.")] string body,
@@ -141,11 +141,12 @@ public sealed class PageTools
         [Description("Optional ID of the parent page. Defaults to the top level of the space.")] string? parentId = null,
         [Description("The body format: markdown (default), adf, or storage.")] string bodyFormat = "markdown",
         [Description("Whether to publish the page immediately instead of saving a draft. Defaults to false; only set it when the user explicitly asks to publish.")] bool publish = false,
-        [Description("Whether only you can see and edit the page. Defaults to true for a draft and false for a published page.")] bool? restrictToMe = null,
+        [Description(PageRestrictions.ParameterDescription + " Defaults to private for a draft and open for a published page.")] string? restrictions = null,
         CancellationToken cancellationToken = default)
     {
+        string restriction = PageRestrictions.Normalize(restrictions) ?? (publish ? PageRestrictions.Open : PageRestrictions.Private);
         string spaceId = await this.ResolveSpaceIdAsync(spaceKey, parentId, cancellationToken);
-        bool isPrivate = restrictToMe ?? !publish;
+        bool isPrivate = restriction == PageRestrictions.Private;
 
         var request = new JsonObject
         {
@@ -163,12 +164,19 @@ public sealed class PageTools
         string path = new QueryString("pages").Add("private", isPrivate ? true : null).ToString();
         JsonNode? page = await this.confluence.SendAsync(HttpMethod.Post, path, request, cancellationToken);
 
+        if (restriction == PageRestrictions.EditRestricted)
+        {
+            string id = page?["id"]?.ToString() ?? throw new McpException("Confluence did not return the ID of the new page, so its restrictions could not be set.");
+            await PageRestrictions.ApplyAsync(this.confluence, id, restriction, cancellationToken);
+        }
+
         return ToolResult.Json(new JsonObject
         {
             ["id"] = page?["id"]?.DeepClone(),
             ["title"] = page?["title"]?.DeepClone(),
             ["status"] = page?["status"]?.DeepClone(),
             ["private"] = isPrivate,
+            ["restrictions"] = restriction,
             ["url"] = this.Link(page, "webui"),
             ["message"] = publish
                 ? "Published the page."
@@ -186,6 +194,7 @@ public sealed class PageTools
     /// <param name="versionMessage">The version message.</param>
     /// <param name="publish">A value indicating whether to publish the change instead of saving a draft.</param>
     /// <param name="allowContentLoss">A value indicating whether a Markdown body may replace content that Markdown cannot represent.</param>
+    /// <param name="restrictions">Who can view and edit the page, or <see langword="null"/> to leave its restrictions unchanged.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>A confirmation, with the URL to preview the change.</returns>
     [McpServerTool(Name = "atlassian_confluence_update_page", OpenWorld = true)]
@@ -198,6 +207,7 @@ public sealed class PageTools
         [Description("Optional version message, shown in the page history.")] string? versionMessage = null,
         [Description("Whether to publish the change immediately instead of saving a draft. Defaults to false; only set it when the user explicitly asks to publish.")] bool publish = false,
         [Description("Whether to allow a Markdown body to replace content that Markdown cannot represent, losing it. Defaults to false; only set it when the user accepts the loss.")] bool allowContentLoss = false,
+        [Description("Optional. " + PageRestrictions.ParameterDescription + " Omit to leave the page's restrictions unchanged. Takes effect immediately, even when the change is saved as a draft.")] string? restrictions = null,
         CancellationToken cancellationToken = default)
     {
         if (body is null && string.IsNullOrWhiteSpace(title))
@@ -205,6 +215,7 @@ public sealed class PageTools
             throw new McpException("Pass a new body, a new title, or both.");
         }
 
+        string? restriction = PageRestrictions.Normalize(restrictions);
         string format = ConfluenceContent.NormalizeFormat(bodyFormat);
         JsonNode? published = await this.TryGetPublishedAsync(pageId, cancellationToken);
         JsonNode? draft = await this.TryGetDraftAsync(pageId, "adf", cancellationToken);
@@ -233,7 +244,7 @@ public sealed class PageTools
         }
 
         string newTitle = string.IsNullOrWhiteSpace(title) ? (draft ?? current)["title"]!.GetValue<string>() : title.Trim();
-        return await this.WriteAsync(pageId, newTitle, requestBody, versionMessage, publish, published, cancellationToken);
+        return await this.WriteAsync(pageId, newTitle, requestBody, versionMessage, publish, published, restriction, cancellationToken);
     }
 
     /// <summary>
@@ -278,7 +289,7 @@ public sealed class PageTools
                 + "Choose a smaller section, or get the page with bodyFormat adf and update it with bodyFormat adf. Set allowContentLoss only if the user accepts the loss.");
         }
 
-        return await this.WriteAsync(pageId, title, ConfluenceContent.ToRequestBody(document), versionMessage, publish, published, cancellationToken);
+        return await this.WriteAsync(pageId, title, ConfluenceContent.ToRequestBody(document), versionMessage, publish, published, restriction: null, cancellationToken);
     }
 
     /// <summary>
@@ -286,15 +297,18 @@ public sealed class PageTools
     /// </summary>
     /// <param name="pageId">The page ID.</param>
     /// <param name="versionMessage">The version message.</param>
+    /// <param name="restrictions">Who can view and edit the page, or <see langword="null"/> to leave its restrictions unchanged.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>A confirmation.</returns>
     [McpServerTool(Name = "atlassian_confluence_publish_page", OpenWorld = true)]
-    [Description("Publishes the draft of the specified Confluence page: a new page saved as a draft, or unpublished changes to an existing page. Only call this when the user explicitly asks to publish, after they have previewed the draft.")]
+    [Description("Publishes the draft of the specified Confluence page: a new page saved as a draft, or unpublished changes to an existing page. A page created as a private draft stays private after publishing unless restrictions is given; pass restrictions open so that everyone who can see the space can view it. Only call this when the user explicitly asks to publish, after they have previewed the draft.")]
     public async Task<string> Publish(
         [Description("The page ID.")] string pageId,
         [Description("Optional version message, shown in the page history.")] string? versionMessage = null,
+        [Description("Optional. " + PageRestrictions.ParameterDescription + " Omit to leave the page's restrictions unchanged.")] string? restrictions = null,
         CancellationToken cancellationToken = default)
     {
+        string? restriction = PageRestrictions.Normalize(restrictions);
         JsonNode draft = await this.TryGetDraftAsync(pageId, "adf", cancellationToken)
             ?? throw new McpException($"Page {pageId} has no draft to publish.");
         JsonNode? published = await this.TryGetPublishedAsync(pageId, cancellationToken);
@@ -306,6 +320,7 @@ public sealed class PageTools
             versionMessage,
             publish: true,
             published,
+            restriction,
             cancellationToken);
     }
 
@@ -383,6 +398,7 @@ public sealed class PageTools
         string? versionMessage,
         bool publish,
         JsonNode? published,
+        string? restriction,
         CancellationToken cancellationToken)
     {
         // A draft holds a single version, and Confluence requires version 1 for it. Publishing
@@ -404,7 +420,12 @@ public sealed class PageTools
 
         JsonNode? page = await this.confluence.SendAsync(HttpMethod.Put, $"pages/{Segment(pageId)}", request, cancellationToken);
 
-        return ToolResult.Json(new JsonObject
+        if (restriction is not null)
+        {
+            await PageRestrictions.ApplyAsync(this.confluence, pageId, restriction, cancellationToken);
+        }
+
+        var result = new JsonObject
         {
             ["id"] = page?["id"]?.DeepClone() ?? pageId,
             ["title"] = page?["title"]?.DeepClone() ?? title,
@@ -416,7 +437,14 @@ public sealed class PageTools
                 : published is null
                     ? "Saved the change to the draft page. It is not published. Open the URL to preview it."
                     : "Saved the change as a draft; the published page is unchanged. Open the URL to preview it in the editor, then publish it there or ask to publish it.",
-        });
+        };
+
+        if (restriction is not null)
+        {
+            result["restrictions"] = restriction;
+        }
+
+        return ToolResult.Json(result);
     }
 
     private async Task<string> ResolveSpaceIdAsync(string? spaceKey, string? parentId, CancellationToken cancellationToken)
