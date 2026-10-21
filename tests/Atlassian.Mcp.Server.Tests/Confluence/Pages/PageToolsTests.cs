@@ -628,6 +628,25 @@ public sealed class PageToolsTests
         Assert.AreEqual("wiki/api/v2/pages/1?draft=true", this.http.LastRequest.Path);
     }
 
+    /// <summary>
+    /// Verifies that deleting a published page moves it to the trash, rather than deleting it permanently.
+    /// </summary>
+    /// <returns>A task.</returns>
+    [TestMethod]
+    public async Task Delete_WithPublishedPage_MovesPageToTrash()
+    {
+        // Arrange
+        this.http.Respond(PageJson("current", 3, "Text")).Respond(null);
+
+        // Act
+        string result = await this.tools.Delete("1");
+
+        // Assert
+        Assert.AreEqual(HttpMethod.Delete, this.http.LastRequest.Method);
+        Assert.AreEqual("wiki/api/v2/pages/1", this.http.LastRequest.Path);
+        StringAssert.Contains(result, "Moved page 1 to the trash.");
+    }
+
     private static string PageJson(string status, int version, string markdown, string? extraNode = null)
     {
         JsonObject document = MarkdownToAdf.Convert(markdown);
