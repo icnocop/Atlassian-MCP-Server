@@ -8,6 +8,7 @@ using Atlassian.Mcp.Server.Common.Adf;
 using Atlassian.Mcp.Server.Common.Http;
 using Atlassian.Mcp.Server.Confluence;
 using Atlassian.Mcp.Server.Confluence.Pages;
+using Atlassian.Mcp.Server.Tests.Common.Adf;
 using Atlassian.Mcp.Server.Tests.TestDoubles;
 using ModelContextProtocol;
 
@@ -323,6 +324,46 @@ public sealed class PageToolsTests
     }
 
     /// <summary>
+    /// Verifies that a Markdown update keeps the localId of each node of the published page, so
+    /// that Confluence compares the versions by their text instead of showing every node as changed.
+    /// </summary>
+    /// <returns>A task.</returns>
+    [TestMethod]
+    public async Task Update_WithMarkdown_KeepsTheLocalIdsOfThePublishedPage()
+    {
+        // Arrange
+        JsonObject stored = AdfNodes.AsStoredByConfluence(MarkdownToAdf.Convert("# A\n\nold\n\n## B\n\nb"));
+        this.http.Respond(PageJson("current", 4, stored)).Respond(PageJson("current", 4, stored)).Respond(PageJson("draft", 1, "x"));
+
+        // Act
+        await this.tools.Update("1", body: "# A\n\nnew\n\n## B\n\nb");
+
+        // Assert
+        var sent = (JsonObject)JsonNode.Parse(this.http.LastRequest.Body!["body"]!["value"]!.GetValue<string>())!;
+        CollectionAssert.AreEqual(AdfNodes.Ids(stored), AdfNodes.Ids(sent));
+    }
+
+    /// <summary>
+    /// Verifies that a section update keeps the localIds of the rest of the page, and gives the new
+    /// section those of the nodes it replaces.
+    /// </summary>
+    /// <returns>A task.</returns>
+    [TestMethod]
+    public async Task UpdateSection_WithMarkdown_KeepsTheLocalIds()
+    {
+        // Arrange
+        JsonObject stored = AdfNodes.AsStoredByConfluence(MarkdownToAdf.Convert("## A\n\nold\n\n## B\n\nb"));
+        this.http.Respond(PageJson("current", 4, stored)).Respond(PageJson("current", 4, stored)).Respond(PageJson("draft", 1, "x"));
+
+        // Act
+        await this.tools.UpdateSection("1", "A", "new");
+
+        // Assert
+        var sent = (JsonObject)JsonNode.Parse(this.http.LastRequest.Body!["body"]!["value"]!.GetValue<string>())!;
+        CollectionAssert.AreEqual(AdfNodes.Ids(stored), AdfNodes.Ids(sent));
+    }
+
+    /// <summary>
     /// Verifies that publishing an update creates the next version of the published page.
     /// </summary>
     /// <returns>A task.</returns>
@@ -556,6 +597,11 @@ public sealed class PageToolsTests
             document["content"]!.AsArray().Add(JsonNode.Parse(extraNode));
         }
 
+        return PageJson(status, version, document);
+    }
+
+    private static string PageJson(string status, int version, JsonObject document)
+    {
         var page = new JsonObject
         {
             ["id"] = "1",

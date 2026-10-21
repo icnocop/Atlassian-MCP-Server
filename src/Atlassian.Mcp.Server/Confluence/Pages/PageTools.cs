@@ -241,6 +241,15 @@ public sealed class PageTools
             }
 
             requestBody = await ConfluenceContent.ToRequestBodyAsync(this.confluence, body, format, cancellationToken);
+
+            // Keep the IDs of the nodes that the new body still has, so that the page history
+            // compares the versions by their text instead of showing every node as changed.
+            if (requestBody["representation"]?.GetValue<string>() == ConfluenceContent.AdfRepresentation
+                && JsonNode.Parse(requestBody["value"]!.GetValue<string>()) is JsonObject document)
+            {
+                AdfLocalIds.Preserve(ConfluenceContent.ReadAdf(current), document);
+                requestBody = ConfluenceContent.ToRequestBody(document);
+            }
         }
 
         string newTitle = string.IsNullOrWhiteSpace(title) ? (draft ?? current)["title"]!.GetValue<string>() : title.Trim();
@@ -288,6 +297,9 @@ public sealed class PageTools
                 $"The section '{heading}' has content that Markdown cannot represent ({AdfInspector.Describe(lossy)}), so replacing it would lose that content. "
                 + "Choose a smaller section, or get the page with bodyFormat adf and update it with bodyFormat adf. Set allowContentLoss only if the user accepts the loss.");
         }
+
+        // The rest of the page keeps its IDs as it is; the new section takes those of the nodes it replaces.
+        AdfLocalIds.Preserve(ConfluenceContent.ReadAdf(basis), document);
 
         return await this.WriteAsync(pageId, title, ConfluenceContent.ToRequestBody(document), versionMessage, publish, published, restriction: null, cancellationToken);
     }
