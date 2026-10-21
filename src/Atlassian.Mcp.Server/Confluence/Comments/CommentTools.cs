@@ -81,7 +81,7 @@ public sealed class CommentTools
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The new comment.</returns>
     [McpServerTool(Name = "atlassian_confluence_add_comment", OpenWorld = true)]
-    [Description("Adds a footer comment to the specified Confluence page, or a reply to one of its comments. The comment is published immediately. Mention a user, notifying them, with `@[Display Name]`, or with `@[Display Name](accountid:ID)` when the account ID is known; a bare @name stays plain text.")]
+    [Description("Adds a footer comment to the specified Confluence page, or a reply to one of its comments. The comment is published immediately. Mention a user, notifying them, with `@[Display Name]`, or with `@[Display Name](accountid:ID)` when the account ID is known; a bare @name stays plain text. Write `<URL>` for a smart link, which shows the current title of the linked page or issue; `[text](URL)` is a plain link.")]
     public async Task<string> Add(
         [Description("The page ID. Ignored when parentCommentId is given.")] string pageId,
         [Description("The comment, in Markdown.")] string body,

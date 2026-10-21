@@ -324,6 +324,45 @@ public sealed class PageToolsTests
     }
 
     /// <summary>
+    /// Verifies that a page with a smart link can be updated with Markdown, because the smart link is read
+    /// as an autolink and written back as the same smart link.
+    /// </summary>
+    /// <returns>A task.</returns>
+    [TestMethod]
+    public async Task Update_WithMarkdownOverSmartLink_WritesAndKeepsIt()
+    {
+        // Arrange
+        string page = PageJson("current", 4, "See <https://example.atlassian.net/wiki/spaces/X/pages/1>.");
+        this.http.Respond(page).Respond(page).Respond(PageJson("draft", 1, "x"));
+
+        // Act
+        await this.tools.Update("1", body: "See <https://example.atlassian.net/wiki/spaces/X/pages/1>, now edited.");
+
+        // Assert
+        JsonNode document = JsonNode.Parse(this.http.LastRequest.Body!["body"]!["value"]!.GetValue<string>())!;
+        Assert.AreEqual("inlineCard", document["content"]![0]!["content"]![1]!["type"]!.GetValue<string>());
+    }
+
+    /// <summary>
+    /// Verifies that a section update can add a smart link, written as an autolink.
+    /// </summary>
+    /// <returns>A task.</returns>
+    [TestMethod]
+    public async Task UpdateSection_WithAutolink_AddsSmartLink()
+    {
+        // Arrange
+        string page = PageJson("current", 4, "## A\n\nold\n\n## B\n\nb");
+        this.http.Respond(page).Respond(page).Respond(PageJson("draft", 1, "x"));
+
+        // Act
+        await this.tools.UpdateSection("1", "A", "See <https://example.atlassian.net/browse/ABC-1>.");
+
+        // Assert
+        JsonNode document = JsonNode.Parse(this.http.LastRequest.Body!["body"]!["value"]!.GetValue<string>())!;
+        Assert.AreEqual("## A\n\nSee <https://example.atlassian.net/browse/ABC-1>.\n\n## B\n\nb", AdfToMarkdown.Convert(document));
+    }
+
+    /// <summary>
     /// Verifies that a Markdown update keeps the localId of each node of the published page, so
     /// that Confluence compares the versions by their text instead of showing every node as changed.
     /// </summary>

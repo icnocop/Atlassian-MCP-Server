@@ -327,8 +327,9 @@ public static class AdfToMarkdown
                     text.Append('[').Append(Attribute<string>(node, "text")).Append(']');
                     break;
                 case "inlineCard":
+                    // An autolink, which converts back to the same smart link.
                     string? url = Attribute<string>(node, "url");
-                    text.Append(url is null ? Placeholder(node) : $"[{url}]({url})");
+                    text.Append(url is null ? Placeholder(node) : $"<{url}>");
                     break;
                 default:
                     text.Append(Placeholder(node));

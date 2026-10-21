@@ -195,13 +195,13 @@ public static partial class MarkdownToAdf
 
     /// <summary>
     /// Inline tokens, in precedence order: code span, bold, strikethrough, italic (* or _), embedded
-    /// attachment, mention, and link. The two italic branches share the group name "em". An embedded
-    /// attachment is <c>![name](attachment:ID)</c>. A mention is <c>@[name]</c>, optionally followed
-    /// by <c>(accountid:ID)</c>; the @ must not follow a word character, so text such as
-    /// <c>user@[host]</c> stays literal.
+    /// attachment, mention, smart link, and link. The two italic branches share the group name "em". An
+    /// embedded attachment is <c>![name](attachment:ID)</c>. A mention is <c>@[name]</c>, optionally
+    /// followed by <c>(accountid:ID)</c>; the @ must not follow a word character, so text such as
+    /// <c>user@[host]</c> stays literal. A smart link is an autolink, <c>&lt;https://…&gt;</c>.
     /// </summary>
     /// <returns>The pattern.</returns>
-    [GeneratedRegex(@"`(?<code>[^`]+)`|\*\*(?<strong>.+?)\*\*|~~(?<strike>.+?)~~|\*(?<em>[^*]+)\*|(?<!\w)_(?<em>.+?)_(?!\w)|!\[(?<mediaName>[^\]]*)\]\(attachment:(?<attachmentId>\d+)\)|(?<!\w)@\[(?<mention>[^\]]+)\](?:\(accountid:(?<accountId>[^)\s]+)\))?|\[(?<linkText>[^\]]+)\]\((?<href>[^)]+)\)", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"`(?<code>[^`]+)`|\*\*(?<strong>.+?)\*\*|~~(?<strike>.+?)~~|\*(?<em>[^*]+)\*|(?<!\w)_(?<em>.+?)_(?!\w)|!\[(?<mediaName>[^\]]*)\]\(attachment:(?<attachmentId>\d+)\)|(?<!\w)@\[(?<mention>[^\]]+)\](?:\(accountid:(?<accountId>[^)\s]+)\))?|<(?<card>https?://[^<>\s]+)>|\[(?<linkText>[^\]]+)\]\((?<href>[^)]+)\)", RegexOptions.IgnoreCase)]
     private static partial Regex InlinePattern();
 
     private static Mark LinkMark(string href) => new("link", new { type = "link", attrs = new { href } });
@@ -802,6 +802,12 @@ public static partial class MarkdownToAdf
                 // explicit account ID the node has none until Convert fills it in.
                 string? accountId = match.Groups["accountId"].Success ? match.Groups["accountId"].Value : null;
                 nodes.Add(new { type = "mention", attrs = new { id = accountId, text = "@" + match.Groups["mention"].Value.Trim() } });
+            }
+            else if (match.Groups["card"].Success)
+            {
+                // A smart link, which Confluence and Jira show with the linked page's or issue's
+                // current title. Like a mention, it is a node rather than text, so it carries no marks.
+                nodes.Add(new { type = "inlineCard", attrs = new { url = match.Groups["card"].Value } });
             }
             else if (match.Groups["linkText"].Success)
             {
