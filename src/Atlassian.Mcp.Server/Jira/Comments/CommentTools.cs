@@ -98,7 +98,7 @@ public sealed class CommentTools
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The new comment.</returns>
     [McpServerTool(Name = "atlassian_jira_add_comment", OpenWorld = true)]
-    [Description("Adds a comment to the specified Jira issue. The body is Markdown, converted to Atlassian Document Format. Optionally restricts who can see it to a project role or a group. Mention a user, notifying them, with `@[Display Name]`, or with `@[Display Name](accountid:ID)` when the account ID is known; a bare @name stays plain text. Embed a file already attached to the issue, shown inline for an image or video and as a file card otherwise, with `![name](attachment:ID)` in a paragraph of its own.")]
+    [Description("Adds a comment to the specified Jira issue. The body is Markdown, converted to Atlassian Document Format. Optionally restricts who can see it to a project role or a group. Mention a user, notifying them, with `@[Display Name]`, or with `@[Display Name](accountid:ID)` when the account ID is known; a bare @name stays plain text. Write `<URL>` for a smart link, which shows the current title of the linked page or issue; `[text](URL)` is a plain link. Embed a file already attached to the issue, shown inline for an image or video and as a file card otherwise, with `![name](attachment:ID)` in a paragraph of its own.")]
     public async Task<string> Add(
         [Description("The issue key, such as PROJ-123, or the issue ID.")] string issueKey,
         [Description("The comment, as Markdown.")] string body,
@@ -122,7 +122,7 @@ public sealed class CommentTools
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The updated comment.</returns>
     [McpServerTool(Name = "atlassian_jira_update_comment", Idempotent = true, OpenWorld = true)]
-    [Description("Replaces the body of the specified comment on a Jira issue. The body is Markdown, converted to Atlassian Document Format. Mention a user, notifying them, with `@[Display Name]`, or with `@[Display Name](accountid:ID)` when the account ID is known; a bare @name stays plain text. Embed a file already attached to the issue, shown inline for an image or video and as a file card otherwise, with `![name](attachment:ID)` in a paragraph of its own.")]
+    [Description("Replaces the body of the specified comment on a Jira issue. The body is Markdown, converted to Atlassian Document Format. Mention a user, notifying them, with `@[Display Name]`, or with `@[Display Name](accountid:ID)` when the account ID is known; a bare @name stays plain text. Write `<URL>` for a smart link, which shows the current title of the linked page or issue; `[text](URL)` is a plain link. Embed a file already attached to the issue, shown inline for an image or video and as a file card otherwise, with `![name](attachment:ID)` in a paragraph of its own.")]
     public async Task<string> Update(
         [Description("The issue key, such as PROJ-123, or the issue ID.")] string issueKey,
         [Description("The comment ID, from atlassian_jira_get_comments.")] string commentId,

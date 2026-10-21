@@ -164,7 +164,7 @@ public sealed class AdfToMarkdownTests
         string markdown = AdfToMarkdown.Convert(document);
 
         // Assert
-        Assert.AreEqual("@[Jane](accountid:abc) :smile: 2023-11-14 [DONE] [https://example.com/x](https://example.com/x)", markdown);
+        Assert.AreEqual("@[Jane](accountid:abc) :smile: 2023-11-14 [DONE] <https://example.com/x>", markdown);
     }
 
     /// <summary>

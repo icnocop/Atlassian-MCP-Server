@@ -21,6 +21,11 @@ All notable changes to this project are documented here. The format follows
 - `atlassian_confluence_discard_draft` discards the unpublished changes of a published page, by everyone, like the editor's Revert to last published version: the draft goes back to the published page, the page is no longer marked as having unpublished changes, and the published page and its versions do not change. Use it to drop a draft that `atlassian_confluence_update_page` or `atlassian_confluence_update_page_section` saved. The public REST APIs have no call for this (deleting a published page's draft is refused, and overwriting the draft leaves the page marked), so it uses the collaborative editing call that the editor makes. A page that was never published is refused.
 
 - An `includeUnavailable` parameter on `atlassian_jira_get_transitions` also lists the transitions that a workflow condition hides in the issue's current state, such as one that requires a field to have a value. Each transition then has `isAvailable`, its `conditions` (what must be true for Jira to offer it, such as "Severity (customfield_10050) is not empty") and its `validators` (what is checked when it is applied), read from the workflow and described with field names. Reading the workflow can need administrator permission; without it, `rulesUnavailable` says why, and the transitions are still listed. It defaults to `false`, which lists only the available transitions, as before.
+- Smart links in Markdown, for Confluence and Jira. An autolink, `<https://…>`, becomes a smart link (an `inlineCard`), which Confluence and Jira show with the current title of the linked page or issue, so the text follows a rename; `[text](URL)` is still a plain link. This works wherever Markdown is accepted, including `atlassian_confluence_update_page_section`, which could not add a smart link before.
+
+### Changed
+
+- Smart links in text are read back as `<URL>`, which converts back to the same smart link, instead of as `[URL](URL)`, which became a plain link when written back. They no longer count as content that Markdown cannot represent, so `atlassian_confluence_update_page` accepts a Markdown body for a page that has them; smart links shown as block cards or embeds still count. An `<https://…>` in Markdown, which stayed literal text before, now becomes a smart link.
 
 ### Fixed
 

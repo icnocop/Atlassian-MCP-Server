@@ -471,6 +471,76 @@ public sealed class MarkdownToAdfTests
     }
 
     /// <summary>
+    /// Verifies that an autolink becomes a smart link (an inlineCard), and that the words around it stay text.
+    /// </summary>
+    [TestMethod]
+    public void Convert_WithAutolink_ProducesSmartLink()
+    {
+        // Arrange
+        const string url = "https://example.atlassian.net/wiki/spaces/X/pages/123";
+
+        // Act
+        JsonElement content = AdfNodes.Blocks($"See <{url}>.")[0].GetProperty("content");
+
+        // Assert
+        Assert.AreEqual(3, content.GetArrayLength());
+        Assert.AreEqual("See ", content[0].GetProperty("text").GetString());
+        Assert.AreEqual("inlineCard", AdfNodes.TypeOf(content[1]));
+        Assert.AreEqual(url, content[1].GetProperty("attrs").GetProperty("url").GetString());
+        Assert.AreEqual(".", content[2].GetProperty("text").GetString());
+    }
+
+    /// <summary>
+    /// Verifies that a link whose text is its URL stays a plain link, as before smart links were supported.
+    /// </summary>
+    [TestMethod]
+    public void Convert_WithLinkWhoseTextIsTheUrl_ProducesPlainLink()
+    {
+        // Act
+        JsonElement node = AdfNodes.Blocks("[https://example.com/x](https://example.com/x)")[0].GetProperty("content")[0];
+
+        // Assert
+        Assert.AreEqual("text", AdfNodes.TypeOf(node));
+        CollectionAssert.AreEqual(new[] { "link" }, AdfNodes.MarksOf(node));
+    }
+
+    /// <summary>
+    /// Verifies that angle brackets in a code span, or around something that is not an http or https URL,
+    /// stay literal text.
+    /// </summary>
+    /// <param name="markdown">The Markdown.</param>
+    /// <param name="expectedText">The text the paragraph must have.</param>
+    [TestMethod]
+    [DataRow("`<https://example.com>`", "<https://example.com>")]
+    [DataRow("a <b> c", "a <b> c")]
+    [DataRow("<ftp://example.com>", "<ftp://example.com>")]
+    public void Convert_WithAngleBracketsThatAreNotAnAutolink_KeepsThemLiteral(string markdown, string expectedText)
+    {
+        // Act
+        JsonElement paragraph = AdfNodes.Blocks(markdown)[0];
+
+        // Assert
+        Assert.IsFalse(paragraph.GetProperty("content").EnumerateArray().Any(node => AdfNodes.TypeOf(node) == "inlineCard"));
+        Assert.AreEqual(expectedText, AdfNodes.TextOf(paragraph));
+    }
+
+    /// <summary>
+    /// Verifies that a smart link read as Markdown converts back to the same smart link.
+    /// </summary>
+    [TestMethod]
+    public void Convert_WithSmartLinkReadBack_RoundTrips()
+    {
+        // Arrange
+        const string markdown = "Owner: <https://example.atlassian.net/browse/ABC-1234>, see notes.";
+
+        // Act
+        string roundTripped = AdfToMarkdown.Convert(MarkdownToAdf.Convert(markdown));
+
+        // Assert
+        Assert.AreEqual(markdown, roundTripped);
+    }
+
+    /// <summary>
     /// Verifies that converting Markdown with empty text produces an empty paragraph.
     /// </summary>
     [TestMethod]

@@ -133,7 +133,7 @@ public sealed class PageTools
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The new page, with the URL to preview it.</returns>
     [McpServerTool(Name = "atlassian_confluence_create_page", OpenWorld = true)]
-    [Description("Creates a Confluence page. By default it is saved as a private draft that only you can see, so you can preview it in Confluence and publish it there or with atlassian_confluence_publish_page. A private draft stays private when it is published, unless restrictions is set to open or edit-restricted. Only publish directly when the user explicitly asks to. Mention a user, notifying them, with `@[Display Name]`, or with `@[Display Name](accountid:ID)` when the account ID is known; a bare @name stays plain text.")]
+    [Description("Creates a Confluence page. By default it is saved as a private draft that only you can see, so you can preview it in Confluence and publish it there or with atlassian_confluence_publish_page. A private draft stays private when it is published, unless restrictions is set to open or edit-restricted. Only publish directly when the user explicitly asks to. Mention a user, notifying them, with `@[Display Name]`, or with `@[Display Name](accountid:ID)` when the account ID is known; a bare @name stays plain text. Write `<URL>` for a smart link, which shows the current title of the linked page or issue; `[text](URL)` is a plain link.")]
     public async Task<string> Create(
         [Description("The page title.")] string title,
         [Description("The page body, in the format given by bodyFormat.")] string body,
@@ -198,7 +198,7 @@ public sealed class PageTools
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>A confirmation, with the URL to preview the change.</returns>
     [McpServerTool(Name = "atlassian_confluence_update_page", OpenWorld = true)]
-    [Description("Replaces the body and/or title of the specified Confluence page. By default the change is saved as a draft and the published page does not change, so the user can preview it in Confluence. A Markdown body is refused when the page has content Markdown cannot represent (macros, smart links, media, panels); use atlassian_confluence_update_page_section, or bodyFormat adf, instead. Mention a user, notifying them, with `@[Display Name]`, or with `@[Display Name](accountid:ID)` when the account ID is known; a bare @name stays plain text.")]
+    [Description("Replaces the body and/or title of the specified Confluence page. By default the change is saved as a draft and the published page does not change, so the user can preview it in Confluence. A Markdown body is refused when the page has content Markdown cannot represent (macros, smart links, media, panels); use atlassian_confluence_update_page_section, or bodyFormat adf, instead. Mention a user, notifying them, with `@[Display Name]`, or with `@[Display Name](accountid:ID)` when the account ID is known; a bare @name stays plain text. Write `<URL>` for a smart link, which shows the current title of the linked page or issue; `[text](URL)` is a plain link.")]
     public async Task<string> Update(
         [Description("The page ID.")] string pageId,
         [Description("Optional new body, in the format given by bodyFormat. Replaces the whole body. Omit to change only the title.")] string? body = null,
@@ -268,7 +268,7 @@ public sealed class PageTools
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>A confirmation, with the URL to preview the change.</returns>
     [McpServerTool(Name = "atlassian_confluence_update_page_section", OpenWorld = true)]
-    [Description("Replaces the content under one heading of the specified Confluence page with Markdown, keeping the rest of the page (including macros and smart links) exactly as it is. The section runs to the next heading of the same or a higher level. By default the change is saved as a draft, building on any existing draft, and the published page does not change. Mention a user, notifying them, with `@[Display Name]`, or with `@[Display Name](accountid:ID)` when the account ID is known; a bare @name stays plain text.")]
+    [Description("Replaces the content under one heading of the specified Confluence page with Markdown, keeping the rest of the page (including macros and smart links) exactly as it is. The section runs to the next heading of the same or a higher level. By default the change is saved as a draft, building on any existing draft, and the published page does not change. Mention a user, notifying them, with `@[Display Name]`, or with `@[Display Name](accountid:ID)` when the account ID is known; a bare @name stays plain text. Write `<URL>` for a smart link, which shows the current title of the linked page or issue; `[text](URL)` is a plain link.")]
     public async Task<string> UpdateSection(
         [Description("The page ID.")] string pageId,
         [Description("The text of the heading that starts the section, such as Installation. Not the page title.")] string heading,

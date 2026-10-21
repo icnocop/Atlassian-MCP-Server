@@ -14,7 +14,8 @@ namespace Atlassian.Mcp.Server.Tests.Common.Adf;
 public sealed class AdfInspectorTests
 {
     /// <summary>
-    /// Verifies that nested macros, smart links, and media are counted by type.
+    /// Verifies that nested macros, block smart links, and media are counted by type, and that a smart link in
+    /// text, which Markdown writes as an autolink, is not.
     /// </summary>
     [TestMethod]
     public void FindLossyContent_WithNestedNodes_CountsEachType()
@@ -24,6 +25,7 @@ public sealed class AdfInspectorTests
             {"type":"doc","version":1,"content":[
               {"type":"extension","attrs":{"extensionKey":"toc"}},
               {"type":"paragraph","content":[{"type":"inlineCard","attrs":{"url":"https://x"}}]},
+              {"type":"blockCard","attrs":{"url":"https://y"}},
               {"type":"bulletList","content":[{"type":"listItem","content":[
                 {"type":"extension","attrs":{"extensionKey":"jira"}}
               ]}]},
@@ -36,7 +38,8 @@ public sealed class AdfInspectorTests
 
         // Assert
         Assert.AreEqual(2, counts["extension"]);
-        Assert.AreEqual(1, counts["inlineCard"]);
+        Assert.IsFalse(counts.ContainsKey("inlineCard"));
+        Assert.AreEqual(1, counts["blockCard"]);
         Assert.AreEqual(1, counts["mediaSingle"]);
         Assert.AreEqual(1, counts["media"]);
     }

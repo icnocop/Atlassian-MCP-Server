@@ -86,7 +86,7 @@ public sealed class IssueTools
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The key, ID, and URL of the new issue.</returns>
     [McpServerTool(Name = "atlassian_jira_create_issue", OpenWorld = true)]
-    [Description("Creates a Jira issue. Call atlassian_jira_get_create_meta first to learn the project's required fields, custom fields, and allowed values. Text fields take Markdown. Mention a user, notifying them, with `@[Display Name]`, or with `@[Display Name](accountid:ID)` when the account ID is known; a bare @name stays plain text. Embed a file already attached to the issue, shown inline for an image or video and as a file card otherwise, with `![name](attachment:ID)` in a paragraph of its own.")]
+    [Description("Creates a Jira issue. Call atlassian_jira_get_create_meta first to learn the project's required fields, custom fields, and allowed values. Text fields take Markdown. Mention a user, notifying them, with `@[Display Name]`, or with `@[Display Name](accountid:ID)` when the account ID is known; a bare @name stays plain text. Write `<URL>` for a smart link, which shows the current title of the linked page or issue; `[text](URL)` is a plain link. Embed a file already attached to the issue, shown inline for an image or video and as a file card otherwise, with `![name](attachment:ID)` in a paragraph of its own.")]
     public async Task<string> Create(
         [Description("The project key, such as PROJ, or the project ID.")] string projectKey,
         [Description("The issue type name, such as Bug, Task, Story, Epic, or Subtask, or its ID.")] string issueType,
@@ -156,7 +156,7 @@ public sealed class IssueTools
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>A confirmation.</returns>
     [McpServerTool(Name = "atlassian_jira_update_issue", Idempotent = true, OpenWorld = true)]
-    [Description("Updates the specified Jira issue. Only the fields that are passed change. Text fields take Markdown. Mention a user, notifying them, with `@[Display Name]`, or with `@[Display Name](accountid:ID)` when the account ID is known; a bare @name stays plain text. Embed a file already attached to the issue, shown inline for an image or video and as a file card otherwise, with `![name](attachment:ID)` in a paragraph of its own.")]
+    [Description("Updates the specified Jira issue. Only the fields that are passed change. Text fields take Markdown. Mention a user, notifying them, with `@[Display Name]`, or with `@[Display Name](accountid:ID)` when the account ID is known; a bare @name stays plain text. Write `<URL>` for a smart link, which shows the current title of the linked page or issue; `[text](URL)` is a plain link. Embed a file already attached to the issue, shown inline for an image or video and as a file card otherwise, with `![name](attachment:ID)` in a paragraph of its own.")]
     public async Task<string> Update(
         [Description("The issue key, such as PROJ-123, or the issue ID.")] string issueKey,
         [Description("Optional new summary, as plain text.")] string? summary = null,
