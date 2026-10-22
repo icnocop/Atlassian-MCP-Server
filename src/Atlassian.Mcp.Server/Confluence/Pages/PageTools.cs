@@ -417,6 +417,89 @@ public sealed class PageTools
         return ToolResult.Success(published is null ? $"Deleted the draft page {pageId}." : $"Moved page {pageId} to the trash.");
     }
 
+    /// <summary>
+    /// Gets the pages and blog posts in the trash of the specified space.
+    /// </summary>
+    /// <param name="spaceKey">The space key or ID.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The trashed pages and blog posts.</returns>
+    [McpServerTool(Name = "atlassian_confluence_get_trash", ReadOnly = true, Idempotent = true, OpenWorld = true)]
+    [Description("Gets the pages and blog posts in the trash of the specified Confluence space: ID, type, and title. A space administrator can restore them in Confluence; atlassian_confluence_purge_page and atlassian_confluence_empty_trash delete them permanently.")]
+    public async Task<string> GetTrash(
+        [Description("The space key, such as DOCS or ~username, or the space ID.")] string spaceKey,
+        CancellationToken cancellationToken = default)
+    {
+        string spaceId = await SpaceTools.ResolveIdAsync(this.confluence, spaceKey, cancellationToken);
+        List<TrashedContent> trashed = await this.GetTrashedAsync(spaceId, cancellationToken);
+        return ToolResult.Json(new JsonObject
+        {
+            ["spaceId"] = spaceId,
+            ["trashed"] = new JsonArray([.. trashed.Select(item => (JsonNode)new JsonObject { ["id"] = item.Id, ["type"] = item.Type, ["title"] = item.Title })]),
+        });
+    }
+
+    /// <summary>
+    /// Deletes the specified page permanently, from the trash.
+    /// </summary>
+    /// <param name="pageId">The page ID.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>A confirmation.</returns>
+    [McpServerTool(Name = "atlassian_confluence_purge_page", Destructive = true, OpenWorld = true)]
+    [Toolset(Toolsets.ConfluenceAdmin)]
+    [Description("Deletes the specified Confluence page permanently, from the space's trash, with its version history; it cannot be restored. The page must be in the trash already (atlassian_confluence_delete_page moves it there); any other page is refused. Only call this when the user asks to delete the page permanently.")]
+    public async Task<string> PurgePage(
+        [Description("The page ID.")] string pageId,
+        CancellationToken cancellationToken = default)
+    {
+        JsonNode? page;
+        try
+        {
+            page = await this.confluence.GetAsync(new QueryString($"pages/{Segment(pageId)}").Add("status", "trashed").ToString(), cancellationToken);
+        }
+        catch (AtlassianApiException exception) when (IsNotFound(exception))
+        {
+            page = null;
+        }
+
+        if (page?["status"]?.GetValue<string>() != "trashed")
+        {
+            throw new McpException($"Page {pageId} is not in the trash, so it was not deleted. Only a page in the trash can be deleted permanently; move it there first with atlassian_confluence_delete_page.");
+        }
+
+        await this.confluence.SendAsync(HttpMethod.Delete, $"pages/{Segment(pageId)}?purge=true", body: null, cancellationToken);
+        return ToolResult.Success($"Deleted page {pageId.Trim()} (\"{page["title"]?.GetValue<string>()}\") permanently.");
+    }
+
+    /// <summary>
+    /// Deletes every page and blog post in the trash of the specified space permanently.
+    /// </summary>
+    /// <param name="spaceKey">The space key or ID.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>What was deleted.</returns>
+    [McpServerTool(Name = "atlassian_confluence_empty_trash", Destructive = true, OpenWorld = true)]
+    [Toolset(Toolsets.ConfluenceAdmin)]
+    [Description("Empties the trash of the specified Confluence space: deletes every page and blog post in it permanently, with their version histories; they cannot be restored. Pages and blog posts that are not in the trash are not touched. Check the contents with atlassian_confluence_get_trash first, and only call this when the user asks to empty the trash.")]
+    public async Task<string> EmptyTrash(
+        [Description("The space key, such as DOCS or ~username, or the space ID.")] string spaceKey,
+        CancellationToken cancellationToken = default)
+    {
+        string spaceId = await SpaceTools.ResolveIdAsync(this.confluence, spaceKey, cancellationToken);
+        List<TrashedContent> trashed = await this.GetTrashedAsync(spaceId, cancellationToken);
+        if (trashed.Count == 0)
+        {
+            return ToolResult.Success($"The trash of space {spaceKey.Trim()} is already empty.");
+        }
+
+        foreach (TrashedContent item in trashed)
+        {
+            string collection = item.Type == "blogpost" ? "blogposts" : "pages";
+            await this.confluence.SendAsync(HttpMethod.Delete, $"{collection}/{Segment(item.Id)}?purge=true", body: null, cancellationToken);
+        }
+
+        string titles = string.Join(", ", trashed.Select(item => $"\"{item.Title}\" ({item.Type} {item.Id})"));
+        return ToolResult.Success($"Emptied the trash of space {spaceKey.Trim()}: deleted {trashed.Count} item(s) permanently: {titles}.");
+    }
+
     private static string Segment(string value) => Uri.EscapeDataString(value.Trim());
 
     private static string BodyFormatParameter(string format) => format == "storage" ? ConfluenceContent.StorageRepresentation : ConfluenceContent.AdfRepresentation;
@@ -495,6 +578,33 @@ public sealed class PageTools
         throw new McpException("Pass spaceKey, parentId, or both.");
     }
 
+    private async Task<List<TrashedContent>> GetTrashedAsync(string spaceId, CancellationToken cancellationToken)
+    {
+        var trashed = new List<TrashedContent>();
+        foreach ((string collection, string type) in new[] { ("pages", "page"), ("blogposts", "blogpost") })
+        {
+            string? cursor = null;
+            do
+            {
+                string path = new QueryString($"spaces/{Segment(spaceId)}/{collection}")
+                    .Add("status", "trashed")
+                    .Add("limit", 250)
+                    .Add("cursor", cursor)
+                    .ToString();
+                JsonNode? response = await this.confluence.GetAsync(path, cancellationToken);
+                foreach (JsonNode? result in response?["results"]?.AsArray() ?? [])
+                {
+                    trashed.Add(new TrashedContent(result!["id"]!.ToString(), type, result["title"]?.GetValue<string>() ?? string.Empty));
+                }
+
+                cursor = ConfluenceContent.NextCursor(response);
+            }
+            while (cursor is not null);
+        }
+
+        return trashed;
+    }
+
     private async Task<JsonNode> GetPublishedOrDraftAsync(string pageId, string format, CancellationToken cancellationToken)
         => await this.TryGetPublishedAsync(pageId, cancellationToken, format)
            ?? await this.TryGetDraftAsync(pageId, format, cancellationToken)
@@ -564,4 +674,6 @@ public sealed class PageTools
         string? relative = page?["_links"]?[name]?.GetValue<string>();
         return relative is null ? null : this.confluence.WebUrl(relative).ToString();
     }
+
+    private sealed record TrashedContent(string Id, string Type, string Title);
 }

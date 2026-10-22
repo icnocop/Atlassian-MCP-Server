@@ -647,6 +647,132 @@ public sealed class PageToolsTests
         StringAssert.Contains(result, "Moved page 1 to the trash.");
     }
 
+    /// <summary>
+    /// Verifies that the trash lists the space's trashed pages, across result pages, and its trashed blog posts.
+    /// </summary>
+    /// <returns>A task.</returns>
+    [TestMethod]
+    public async Task GetTrash_WithTrashedPagesAndBlogPosts_ListsBoth()
+    {
+        // Arrange
+        this.http
+            .Respond("""{"results":[{"id":"1","title":"First"}],"_links":{"next":"/wiki/api/v2/spaces/9/pages?status=trashed&cursor=abc"}}""")
+            .Respond("""{"results":[{"id":"2","title":"Second"}],"_links":{}}""")
+            .Respond("""{"results":[{"id":"3","title":"Post"}],"_links":{}}""");
+
+        // Act
+        string result = await this.tools.GetTrash("9");
+
+        // Assert
+        Assert.AreEqual("wiki/api/v2/spaces/9/pages?status=trashed&limit=250", this.http.Requests[0].Path);
+        Assert.AreEqual("wiki/api/v2/spaces/9/pages?status=trashed&limit=250&cursor=abc", this.http.Requests[1].Path);
+        Assert.AreEqual("wiki/api/v2/spaces/9/blogposts?status=trashed&limit=250", this.http.Requests[2].Path);
+        JsonArray trashed = JsonNode.Parse(result)!["trashed"]!.AsArray();
+        Assert.HasCount(3, trashed);
+        Assert.AreEqual("page", trashed[1]!["type"]!.GetValue<string>());
+        Assert.AreEqual("blogpost", trashed[2]!["type"]!.GetValue<string>());
+        Assert.AreEqual("Post", trashed[2]!["title"]!.GetValue<string>());
+    }
+
+    /// <summary>
+    /// Verifies that purging a page in the trash deletes it permanently.
+    /// </summary>
+    /// <returns>A task.</returns>
+    [TestMethod]
+    public async Task PurgePage_WithTrashedPage_DeletesPermanently()
+    {
+        // Arrange
+        this.http.Respond("""{"id":"1","status":"trashed","title":"Old"}""").Respond(null);
+
+        // Act
+        string result = await this.tools.PurgePage("1");
+
+        // Assert
+        Assert.AreEqual("wiki/api/v2/pages/1?status=trashed", this.http.Requests[0].Path);
+        Assert.AreEqual(HttpMethod.Delete, this.http.LastRequest.Method);
+        Assert.AreEqual("wiki/api/v2/pages/1?purge=true", this.http.LastRequest.Path);
+        Assert.AreEqual("Deleted page 1 (\"Old\") permanently.", JsonNode.Parse(result)!["message"]!.GetValue<string>());
+    }
+
+    /// <summary>
+    /// Verifies that purging a page that is not in the trash is refused, and nothing is deleted.
+    /// </summary>
+    /// <returns>A task.</returns>
+    [TestMethod]
+    public async Task PurgePage_WithCurrentPage_ThrowsAndDeletesNothing()
+    {
+        // Arrange
+        this.http.Respond("""{"id":"1","status":"current","title":"Live"}""");
+
+        // Act
+        McpException exception = await Assert.ThrowsExactlyAsync<McpException>(() => this.tools.PurgePage("1"));
+
+        // Assert
+        StringAssert.Contains(exception.Message, "is not in the trash", StringComparison.Ordinal);
+        Assert.HasCount(1, this.http.Requests);
+    }
+
+    /// <summary>
+    /// Verifies that purging a page that does not exist is refused, and nothing is deleted.
+    /// </summary>
+    /// <returns>A task.</returns>
+    [TestMethod]
+    public async Task PurgePage_WithMissingPage_ThrowsAndDeletesNothing()
+    {
+        // Arrange
+        this.http.Fail(new AtlassianApiException(HttpStatusCode.NotFound, "Not found"));
+
+        // Act
+        McpException exception = await Assert.ThrowsExactlyAsync<McpException>(() => this.tools.PurgePage("1"));
+
+        // Assert
+        StringAssert.Contains(exception.Message, "is not in the trash", StringComparison.Ordinal);
+        Assert.HasCount(1, this.http.Requests);
+    }
+
+    /// <summary>
+    /// Verifies that emptying the trash deletes each trashed page and blog post permanently, at its own endpoint.
+    /// </summary>
+    /// <returns>A task.</returns>
+    [TestMethod]
+    public async Task EmptyTrash_WithTrashedPageAndBlogPost_PurgesEach()
+    {
+        // Arrange
+        this.http
+            .Respond("""{"results":[{"id":"1","title":"Old page"}],"_links":{}}""")
+            .Respond("""{"results":[{"id":"2","title":"Old post"}],"_links":{}}""")
+            .Respond(null)
+            .Respond(null);
+
+        // Act
+        string result = await this.tools.EmptyTrash("9");
+
+        // Assert
+        Assert.AreEqual(HttpMethod.Delete, this.http.Requests[2].Method);
+        Assert.AreEqual("wiki/api/v2/pages/1?purge=true", this.http.Requests[2].Path);
+        Assert.AreEqual(HttpMethod.Delete, this.http.Requests[3].Method);
+        Assert.AreEqual("wiki/api/v2/blogposts/2?purge=true", this.http.Requests[3].Path);
+        StringAssert.Contains(result, "deleted 2 item(s) permanently");
+    }
+
+    /// <summary>
+    /// Verifies that emptying a trash that is already empty deletes nothing.
+    /// </summary>
+    /// <returns>A task.</returns>
+    [TestMethod]
+    public async Task EmptyTrash_WithEmptyTrash_DeletesNothing()
+    {
+        // Arrange
+        this.http.Respond("""{"results":[],"_links":{}}""").Respond("""{"results":[],"_links":{}}""");
+
+        // Act
+        string result = await this.tools.EmptyTrash("9");
+
+        // Assert
+        Assert.HasCount(2, this.http.Requests);
+        StringAssert.Contains(result, "already empty");
+    }
+
     private static string PageJson(string status, int version, string markdown, string? extraNode = null)
     {
         JsonObject document = MarkdownToAdf.Convert(markdown);
