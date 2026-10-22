@@ -3,6 +3,7 @@
 // </copyright>
 
 using System.ComponentModel;
+using System.Net;
 using System.Text.Json.Nodes;
 using Atlassian.Mcp.Server.Common;
 using Atlassian.Mcp.Server.Common.Adf;
@@ -95,20 +96,32 @@ public sealed class CommentTools
     /// <param name="body">The comment, as Markdown.</param>
     /// <param name="visibilityType">The kind of restriction: role or group.</param>
     /// <param name="visibilityValue">The role or group name that may see the comment.</param>
+    /// <param name="parentCommentId">The ID of the comment to reply to, or <see langword="null"/> for a new thread.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The new comment.</returns>
     [McpServerTool(Name = "atlassian_jira_add_comment", OpenWorld = true)]
-    [Description("Adds a comment to the specified Jira issue. The body is Markdown, converted to Atlassian Document Format. Optionally restricts who can see it to a project role or a group. Mention a user, notifying them, with `@[Display Name]`, or with `@[Display Name](accountid:ID)` when the account ID is known; a bare @name stays plain text. Write `<URL>` for a smart link, which shows the current title of the linked page or issue; `[text](URL)` is a plain link. Embed a file already attached to the issue, shown inline for an image or video and as a file card otherwise, with `![name](attachment:ID)` in a paragraph of its own.")]
+    [Description("Adds a comment to the specified Jira issue, or replies to a comment when parentCommentId is given. The body is Markdown, converted to Atlassian Document Format. Optionally restricts who can see it to a project role or a group. Mention a user, notifying them, with `@[Display Name]`, or with `@[Display Name](accountid:ID)` when the account ID is known; a bare @name stays plain text. Write `<URL>` for a smart link, which shows the current title of the linked page or issue; `[text](URL)` is a plain link. Embed a file already attached to the issue, shown inline for an image or video and as a file card otherwise, with `![name](attachment:ID)` in a paragraph of its own.")]
     public async Task<string> Add(
         [Description("The issue key, such as PROJ-123, or the issue ID.")] string issueKey,
         [Description("The comment, as Markdown.")] string body,
         [Description("Restricts visibility: \"role\" or \"group\". Requires visibilityValue.")] string? visibilityType = null,
         [Description("The project role name or group name that may see the comment.")] string? visibilityValue = null,
+        [Description("Optional ID of the comment to reply to, from atlassian_jira_get_comments. The new comment is added to that comment's thread; its parentId in the result names the comment it replies to. Jira threads are one level deep, so replying to a reply adds the new comment to the same thread, under the comment that started it. Omit to start a new thread.")] string? parentCommentId = null,
         CancellationToken cancellationToken = default)
     {
+        string path = $"issue/{JiraClient.Segment(issueKey)}/comment";
+        JsonNode? threadId = string.IsNullOrWhiteSpace(parentCommentId)
+            ? null
+            : await this.GetThreadIdAsync(issueKey, parentCommentId, cancellationToken);
+
         AdfReferences references = await this.jira.ResolveReferencesAsync([body], cancellationToken);
         JsonObject request = BuildBody(body, visibilityType, visibilityValue, references);
-        return ToolResult.Json(await this.jira.SendAsync(HttpMethod.Post, $"issue/{JiraClient.Segment(issueKey)}/comment", request, cancellationToken));
+        if (threadId != null)
+        {
+            request["parentId"] = threadId;
+        }
+
+        return ToolResult.Json(await this.jira.SendAsync(HttpMethod.Post, path, request, cancellationToken));
     }
 
     /// <summary>
@@ -210,5 +223,37 @@ public sealed class CommentTools
         }
 
         return ToolResult.Json(await JiraRichText.GetAsMarkdownAsync(this.jira, path, includeRenderedBody, "renderedBody", cancellationToken));
+    }
+
+    /// <summary>
+    /// Gets the ID of the comment that starts the thread a reply to the specified comment belongs in.
+    /// <para>
+    /// Jira threads are one level deep: it refuses a reply whose parent is itself a reply, with the
+    /// same error as for a parent that does not exist. So the comment is looked up first, and a reply
+    /// is replaced by the comment it replies to, which is what Jira does when a reply is answered in
+    /// its own interface. The lookup also turns a missing comment into a clear error.
+    /// </para>
+    /// </summary>
+    /// <param name="issueKey">The issue key or ID.</param>
+    /// <param name="commentId">The ID of the comment to reply to.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The ID of the comment that starts the thread.</returns>
+    /// <exception cref="McpException">The comment was not found.</exception>
+    private async Task<JsonNode> GetThreadIdAsync(string issueKey, string commentId, CancellationToken cancellationToken)
+    {
+        JsonNode? comment;
+        try
+        {
+            comment = await this.jira.GetAsync($"issue/{JiraClient.Segment(issueKey)}/comment/{JiraClient.Segment(commentId)}", cancellationToken);
+        }
+        catch (AtlassianApiException exception) when (exception.StatusCode == HttpStatusCode.NotFound)
+        {
+            throw new McpException(
+                $"Comment {commentId} was not found on {issueKey}, or you cannot see it. Use the ID of a comment from atlassian_jira_get_comments as parentCommentId.");
+        }
+
+        JsonNode? threadId = comment?["parentId"] ?? comment?["id"];
+        return threadId?.DeepClone()
+            ?? throw new McpException($"Jira returned comment {commentId} on {issueKey} without an ID.");
     }
 }

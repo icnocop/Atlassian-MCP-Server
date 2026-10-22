@@ -221,7 +221,107 @@ public sealed class CommentToolsTests
         Assert.AreEqual("doc", body["type"]!.GetValue<string>());
         Assert.AreEqual("strong", body["content"]![0]!["content"]![1]!["marks"]![0]!["type"]!.GetValue<string>());
         Assert.IsNull(request.Body["visibility"]);
+        Assert.IsNull(request.Body["parentId"]);
         Assert.AreEqual("""{"id":"10100"}""", result);
+    }
+
+    /// <summary>
+    /// Verifies that a reply to a comment that starts a thread looks the comment up, and is posted
+    /// with that comment as its parent.
+    /// </summary>
+    /// <returns>A task.</returns>
+    [TestMethod]
+    public async Task Add_WithParentComment_SendsParentId()
+    {
+        // Arrange
+        this.http
+            .Respond("""{"id":"10100","body":{"type":"doc","version":1,"content":[]}}""")
+            .Respond("""{"id":"10101","parentId":10100}""");
+
+        // Act
+        string result = await this.tools.Add("PROJ-1", "Thanks, that answers it.", parentCommentId: "10100");
+
+        // Assert
+        Assert.HasCount(2, this.http.Requests);
+        Assert.AreEqual(HttpMethod.Get, this.http.Requests[0].Method);
+        Assert.AreEqual("rest/api/3/issue/PROJ-1/comment/10100", this.http.Requests[0].Path);
+        RecordedRequest request = this.http.LastRequest;
+        Assert.AreEqual(HttpMethod.Post, request.Method);
+        Assert.AreEqual("rest/api/3/issue/PROJ-1/comment", request.Path);
+        Assert.AreEqual("10100", request.Body!["parentId"]!.GetValue<string>());
+        Assert.AreEqual("doc", request.Body["body"]!["type"]!.GetValue<string>());
+        Assert.AreEqual("""{"id":"10101","parentId":10100}""", result);
+    }
+
+    /// <summary>
+    /// Verifies that a reply to a reply is posted in the same thread, with the comment that started
+    /// the thread as its parent, because Jira refuses a reply whose parent is itself a reply.
+    /// </summary>
+    /// <returns>A task.</returns>
+    [TestMethod]
+    public async Task Add_WithReplyAsParent_SendsTheThreadsFirstCommentAsParentId()
+    {
+        // Arrange
+        this.http
+            .Respond("""{"id":"10101","parentId":10100}""")
+            .Respond("""{"id":"10102","parentId":10100}""");
+
+        // Act
+        await this.tools.Add("PROJ-1", "Agreed.", parentCommentId: "10101");
+
+        // Assert
+        Assert.AreEqual("rest/api/3/issue/PROJ-1/comment/10101", this.http.Requests[0].Path);
+        Assert.AreEqual(10100, this.http.LastRequest.Body!["parentId"]!.GetValue<long>());
+    }
+
+    /// <summary>
+    /// Verifies that a parent comment that does not exist fails the call before the reply is posted.
+    /// </summary>
+    /// <returns>A task.</returns>
+    [TestMethod]
+    public async Task Add_WithMissingParentComment_ThrowsAndPostsNothing()
+    {
+        // Arrange
+        this.http.Fail(new AtlassianApiException(HttpStatusCode.NotFound, "Atlassian returned 404 Not Found."));
+
+        // Act
+        McpException exception = await Assert.ThrowsExactlyAsync<McpException>(
+            () => this.tools.Add("PROJ-1", "A reply.", parentCommentId: "999"));
+
+        // Assert
+        StringAssert.Contains(exception.Message, "Comment 999 was not found on PROJ-1", StringComparison.Ordinal);
+        StringAssert.Contains(exception.Message, "atlassian_jira_get_comments", StringComparison.Ordinal);
+        Assert.HasCount(1, this.http.Requests);
+        Assert.AreEqual(HttpMethod.Get, this.http.LastRequest.Method);
+    }
+
+    /// <summary>
+    /// Verifies that the parent comment is looked up before the mentions, so that a missing parent
+    /// fails the call without searching for users.
+    /// </summary>
+    /// <returns>A task.</returns>
+    [TestMethod]
+    public async Task Add_WithParentCommentAndMention_LooksUpTheParentFirst()
+    {
+        // Arrange
+        this.http
+            .Respond("""{"id":"10100"}""")
+            .Respond("""[{"accountId":"5b10ac8d","displayName":"Jane Doe","accountType":"atlassian","active":true}]""")
+            .Respond("""{"id":"10101","parentId":10100}""");
+
+        // Act
+        await this.tools.Add("PROJ-1", "@[Jane Doe] see above.", parentCommentId: "10100");
+
+        // Assert
+        CollectionAssert.AreEqual(
+            new[]
+            {
+                "rest/api/3/issue/PROJ-1/comment/10100",
+                "rest/api/3/user/search?query=Jane%20Doe&maxResults=50",
+                "rest/api/3/issue/PROJ-1/comment",
+            },
+            this.http.Requests.Select(request => request.Path).ToArray());
+        Assert.AreEqual("10100", this.http.LastRequest.Body!["parentId"]!.GetValue<string>());
     }
 
     /// <summary>
