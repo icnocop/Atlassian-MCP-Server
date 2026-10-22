@@ -89,7 +89,7 @@ The server is configured with environment variables, which each guide shows how 
 | `jira-fields` | Fields, issue types, priorities, statuses, resolutions, and connection checks |
 | `jira-admin` | Creating, updating, and deleting projects, and group membership |
 | `confluence` | Pages, drafts, search, spaces, comments, attachments, and labels |
-| `confluence-admin` | Deleting pages and attachments. Not included in `all`; enable it explicitly. |
+| `confluence-admin` | Deleting pages and attachments, and deleting pages from the trash permanently (one page, or the whole trash of a space). Not included in `all`; enable it explicitly. |
 
 Some clients limit how many tools they send to the model; GitHub Copilot allows about 128. The guides show a toolset selection that stays under that limit.
 
