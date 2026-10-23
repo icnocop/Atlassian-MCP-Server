@@ -424,16 +424,20 @@ public sealed class PageTools
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The trashed pages and blog posts.</returns>
     [McpServerTool(Name = "atlassian_confluence_get_trash", ReadOnly = true, Idempotent = true, OpenWorld = true)]
-    [Description("Gets the pages and blog posts in the trash of the specified Confluence space: ID, type, and title. A space administrator can restore them in Confluence; atlassian_confluence_purge_page and atlassian_confluence_empty_trash delete them permanently.")]
+    [Description("Gets the pages and blog posts in the trash of the specified Confluence space: their count, and the ID, type, and title of each (count is 0 and there is no list when the trash is empty). A space administrator can restore them in Confluence; atlassian_confluence_purge_page and atlassian_confluence_empty_trash delete them permanently.")]
     public async Task<string> GetTrash(
         [Description("The space key, such as DOCS or ~username, or the space ID.")] string spaceKey,
         CancellationToken cancellationToken = default)
     {
         string spaceId = await SpaceTools.ResolveIdAsync(this.confluence, spaceKey, cancellationToken);
         List<TrashedContent> trashed = await this.GetTrashedAsync(spaceId, cancellationToken);
+
+        // The count says how many there are even when there are none: the result's empty list is pruned away,
+        // which would otherwise leave nothing to tell an empty trash from a missing field.
         return ToolResult.Json(new JsonObject
         {
             ["spaceId"] = spaceId,
+            ["count"] = trashed.Count,
             ["trashed"] = new JsonArray([.. trashed.Select(item => (JsonNode)new JsonObject { ["id"] = item.Id, ["type"] = item.Type, ["title"] = item.Title })]),
         });
     }
