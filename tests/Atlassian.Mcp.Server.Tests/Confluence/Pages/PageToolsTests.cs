@@ -667,11 +667,32 @@ public sealed class PageToolsTests
         Assert.AreEqual("wiki/api/v2/spaces/9/pages?status=trashed&limit=250", this.http.Requests[0].Path);
         Assert.AreEqual("wiki/api/v2/spaces/9/pages?status=trashed&limit=250&cursor=abc", this.http.Requests[1].Path);
         Assert.AreEqual("wiki/api/v2/spaces/9/blogposts?status=trashed&limit=250", this.http.Requests[2].Path);
-        JsonArray trashed = JsonNode.Parse(result)!["trashed"]!.AsArray();
+        JsonNode json = JsonNode.Parse(result)!;
+        Assert.AreEqual(3, json["count"]!.GetValue<int>());
+        JsonArray trashed = json["trashed"]!.AsArray();
         Assert.HasCount(3, trashed);
         Assert.AreEqual("page", trashed[1]!["type"]!.GetValue<string>());
         Assert.AreEqual("blogpost", trashed[2]!["type"]!.GetValue<string>());
         Assert.AreEqual("Post", trashed[2]!["title"]!.GetValue<string>());
+    }
+
+    /// <summary>
+    /// Verifies that an empty trash is reported with a count of 0, rather than as a result with nothing in it.
+    /// </summary>
+    /// <returns>A task.</returns>
+    [TestMethod]
+    public async Task GetTrash_WithEmptyTrash_ReturnsCountZero()
+    {
+        // Arrange
+        this.http.Respond("""{"results":[],"_links":{}}""").Respond("""{"results":[],"_links":{}}""");
+
+        // Act
+        string result = await this.tools.GetTrash("9");
+
+        // Assert
+        JsonNode json = JsonNode.Parse(result)!;
+        Assert.AreEqual("9", json["spaceId"]!.GetValue<string>());
+        Assert.AreEqual(0, json["count"]!.GetValue<int>());
     }
 
     /// <summary>
