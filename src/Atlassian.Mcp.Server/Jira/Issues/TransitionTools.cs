@@ -122,17 +122,32 @@ public sealed class TransitionTools
             body["fields"] = fieldValues;
         }
 
-        if (!string.IsNullOrWhiteSpace(comment))
-        {
-            JsonObject? adf = await this.jira.ToAdfAsync(comment, cancellationToken);
-            body["update"] = new JsonObject
-            {
-                ["comment"] = new JsonArray(new JsonObject { ["add"] = new JsonObject { ["body"] = adf } }),
-            };
-        }
+        // The comment is converted first, so that a mention or embedded file that cannot be resolved
+        // fails the call before the issue moves.
+        JsonObject? commentBody = string.IsNullOrWhiteSpace(comment)
+            ? null
+            : await this.jira.ToAdfAsync(comment, cancellationToken);
 
         await this.jira.SendAsync(HttpMethod.Post, $"issue/{issue}/transitions", body, cancellationToken);
-        return ToolResult.Success($"Applied transition '{name}' to {issueKey}.");
+        if (commentBody is null)
+        {
+            return ToolResult.Success($"Applied transition '{name}' to {issueKey}.");
+        }
+
+        // The comment is posted on its own rather than as update.comment in the transition request:
+        // Jira applies an update only for a transition that has a screen, and silently ignores it for
+        // one that does not, while still applying the transition.
+        JsonNode? added;
+        try
+        {
+            added = await this.jira.SendAsync(HttpMethod.Post, $"issue/{issue}/comment", new JsonObject { ["body"] = commentBody }, cancellationToken);
+        }
+        catch (AtlassianApiException exception)
+        {
+            throw new McpException($"Applied transition '{name}' to {issueKey}, but the comment could not be added: {exception.Message} Add it with atlassian_jira_add_comment.", exception);
+        }
+
+        return ToolResult.Success($"Applied transition '{name}' to {issueKey} and added comment {added?["id"]}.");
     }
 
     private static JsonObject? Find(List<JsonObject> transitions, string wanted)
