@@ -164,23 +164,73 @@ public sealed class TransitionToolsTests : IDisposable
     }
 
     /// <summary>
-    /// Verifies that a target status name is resolved, and a comment is added as ADF.
+    /// Verifies that a target status name is resolved, and the comment is posted as ADF on its own after
+    /// the transition, not as an update in the transition request, which Jira ignores for a transition
+    /// that has no screen.
     /// </summary>
     /// <returns>A task.</returns>
     [TestMethod]
-    public async Task Apply_WithTargetStatusAndComment_AddsAdfComment()
+    public async Task Apply_WithTargetStatusAndComment_PostsAdfCommentAfterTransition()
+    {
+        // Arrange
+        this.http.Respond(Transitions).Respond(null).Respond("""{"id":"10001"}""");
+
+        // Act
+        string result = await this.tools.Apply("PROJ-1", "in progress", comment: "**Started**");
+
+        // Assert
+        Assert.HasCount(3, this.http.Requests);
+        RecordedRequest transition = this.http.Requests[1];
+        Assert.AreEqual("rest/api/3/issue/PROJ-1/transitions", transition.Path);
+        Assert.AreEqual("11", transition.Body!["transition"]!["id"]!.GetValue<string>());
+        Assert.IsNull(transition.Body["update"]);
+        Assert.IsNull(transition.Body["fields"]);
+
+        RecordedRequest comment = this.http.Requests[2];
+        Assert.AreEqual(HttpMethod.Post, comment.Method);
+        Assert.AreEqual("rest/api/3/issue/PROJ-1/comment", comment.Path);
+        Assert.AreEqual("doc", comment.Body!["body"]!["type"]!.GetValue<string>());
+        StringAssert.Contains(result, "added comment 10001", StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Verifies that a comment that cannot be added is reported as such, saying that the transition was
+    /// still applied, rather than as success or as a failed transition.
+    /// </summary>
+    /// <returns>A task.</returns>
+    [TestMethod]
+    public async Task Apply_WhenCommentFails_ThrowsSayingTransitionWasApplied()
+    {
+        // Arrange
+        this.http.Respond(Transitions).Respond(null)
+            .Fail(new AtlassianApiException(HttpStatusCode.Forbidden, "You cannot add comments."));
+
+        // Act
+        McpException exception = await Assert.ThrowsExactlyAsync<McpException>(() => this.tools.Apply("PROJ-1", "Done", comment: "Closing."));
+
+        // Assert
+        StringAssert.Contains(exception.Message, "Applied transition 'Done' to PROJ-1, but the comment could not be added", StringComparison.Ordinal);
+        StringAssert.Contains(exception.Message, "You cannot add comments.", StringComparison.Ordinal);
+        StringAssert.Contains(exception.Message, "atlassian_jira_add_comment", StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Verifies that without a comment, only the transition is posted.
+    /// </summary>
+    /// <returns>A task.</returns>
+    [TestMethod]
+    public async Task Apply_WithoutComment_PostsNoComment()
     {
         // Arrange
         this.http.Respond(Transitions).Respond(null);
 
         // Act
-        await this.tools.Apply("PROJ-1", "in progress", comment: "**Started**");
+        string result = await this.tools.Apply("PROJ-1", "Done");
 
         // Assert
-        JsonNode body = this.http.LastRequest.Body!;
-        Assert.AreEqual("11", body["transition"]!["id"]!.GetValue<string>());
-        Assert.AreEqual("doc", body["update"]!["comment"]![0]!["add"]!["body"]!["type"]!.GetValue<string>());
-        Assert.IsNull(body["fields"]);
+        Assert.HasCount(2, this.http.Requests);
+        Assert.AreEqual("rest/api/3/issue/PROJ-1/transitions", this.http.LastRequest.Path);
+        StringAssert.Contains(result, "Applied transition 'Done' to PROJ-1.", StringComparison.Ordinal);
     }
 
     /// <summary>
